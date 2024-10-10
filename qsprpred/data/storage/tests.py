@@ -4,12 +4,15 @@ from abc import ABC, abstractmethod
 from unittest import TestCase
 
 import pandas as pd
+from rdkit import Chem
+from rdkit.Chem.rdDistGeom import EmbedMultipleConfs
 
 from qsprpred.data.chem.identifiers import InchiIdentifier
 from qsprpred.data.chem.standardizers.check_smiles import CheckSmilesValid
 from qsprpred.data.chem.standardizers.papyrus import PapyrusStandardizer
 from qsprpred.data.storage.interfaces.chem_store import ChemStore
-from qsprpred.data.storage.tabular.basic_storage import PandasChemStore
+from qsprpred.data.storage.tabular.hierarchical import PandasRepresentationStore
+from qsprpred.data.storage.tabular.simple import PandasChemStore
 
 
 class StorageTest(ABC):
@@ -296,3 +299,61 @@ class TabularStorageTest(StorageTest, TestCase):
         result.removeMol(result_mol.id)
         self.assertNotIn(result_mol.id, result)
         self.assertEqual(len(result), 0)
+
+
+class TabularRepresentationStorageTest(StorageTest, TestCase):
+    def setUp(self):
+        super().setUp()
+        store = PandasChemStore(
+            f"{self.__class__.__name__}_test_basic_main",
+            self.outputPath,
+            pd.read_csv(self.exampleFileBasic),
+            standardizer=PapyrusStandardizer(),
+            identifier=InchiIdentifier(),
+        )
+        store.addLibrary(
+            f"{store.name}_2",
+            pd.read_csv(self.exampleFileIndex),
+            smiles_col="smiles",
+        )
+        self.main = store
+
+    def getStorage(self) -> PandasRepresentationStore:
+        return PandasRepresentationStore(
+            f"{self.__class__.__name__}_test_basic",
+            path=self.outputPath,
+            chem_store=self.main,
+        )
+
+    def testAddRepresentations(self):
+        # generate conformers for each molecule in main store
+        parent_ids = []
+        sdfs = []
+        smiles = []
+        for mol in self.main:
+            rd_mol = mol.as_rd_mol()
+            rd_mol = Chem.AddHs(rd_mol)
+            EmbedMultipleConfs(
+                rd_mol,
+                numConfs=3,
+                randomSeed=42,
+                pruneRmsThresh=0.5,
+            )
+            # get SDFs for each conformer
+            for conf in rd_mol.GetConformers():
+                parent_ids.append(mol.id)
+                smiles.append(mol.smiles)
+                sdfs.append(Chem.MolToMolBlock(rd_mol, confId=conf.GetId()))
+        # add them as representations
+        store = self.getStorage()
+        store.addMols(smiles, {
+            "parent_id": parent_ids,
+            "sdf": sdfs,
+        })
+        self.assertEqual(len(store.representations), len(parent_ids))
+        for mol in store:
+            self.assertTrue(mol.representations)
+            for rep in mol.representations:
+                mol = rep.as_rd_mol()
+                self.assertTrue(mol)
+                self.assertFalse(rep.representations)

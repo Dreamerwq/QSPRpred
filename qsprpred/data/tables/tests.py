@@ -9,18 +9,17 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import KFold, ShuffleSplit
 
 from qsprpred.data.descriptors.sets import DrugExPhyschem
-from qsprpred.data.storage.tabular.basic_storage import PandasChemStore
-
+from qsprpred.data.storage.tabular.simple import PandasChemStore
+from .interfaces.qspr_data_set import QSPRDataSet
+from .mol import MoleculeTable
+from ..chem.standardizers.papyrus import PapyrusStandardizer
+from ..descriptors.fingerprints import MorganFP
 from ... import TargetProperty, TargetTasks
 from ...data.tables.qspr import QSPRTable
 from ...utils.stopwatch import StopWatch
 from ...utils.testing.base import QSPRTestCase
 from ...utils.testing.check_mixins import DataPrepCheckMixIn
 from ...utils.testing.path_mixins import DataSetsPathMixIn, PathMixIn
-from ..chem.standardizers.papyrus import PapyrusStandardizer
-from ..descriptors.fingerprints import MorganFP
-from .interfaces.qspr_data_set import QSPRDataSet
-from .mol import MoleculeTable
 
 
 class TestMolTable(DataSetsPathMixIn, QSPRTestCase):
@@ -198,6 +197,7 @@ class TestMolTable(DataSetsPathMixIn, QSPRTestCase):
 class TestDataSetCreationAndSerialization(DataSetsPathMixIn, QSPRTestCase):
     """Simple tests for dataset creation and serialization under different conditions
     and error states."""
+
     def setUp(self):
         super().setUp()
         self.setUpPaths()
@@ -557,7 +557,7 @@ class TestDataSetCreationAndSerialization(DataSetsPathMixIn, QSPRTestCase):
         self.assertListEqual(train.index.tolist(), order_train)
         split = KFold(5, shuffle=True, random_state=dataset.randomState)
         for i, (_, _, _, _, train_index, test_index) in enumerate(
-            dataset.iterFolds(split)
+                dataset.iterFolds(split)
         ):
             self.assertListEqual(train.iloc[train_index].index.tolist(), order_folds[i])
 
@@ -640,6 +640,7 @@ def prop_transform(x):
 
 class TestTargetProperty(QSPRTestCase):
     """Test the TargetProperty class."""
+
     def checkTargetProperty(self, target_prop, name, task, th):
         # Check the target property creation consistency
         self.assertEqual(target_prop.name, name)
@@ -731,21 +732,22 @@ class TestDataSetPreparation(DataSetsPathMixIn, DataPrepCheckMixIn, QSPRTestCase
     """Test as many possible combinations of data sets and their preparation
     settings. These can run potentially for a long time so use the ``skip`` decorator
     if you want to skip all these tests to speed things up during development."""
+
     def setUp(self):
         super().setUp()
         self.setUpPaths()
 
     @parameterized.expand(DataSetsPathMixIn.getPrepCombos())
     def testPrepCombos(
-        self,
-        _,
-        name,
-        feature_calculators,
-        split,
-        feature_standardizer,
-        feature_filter,
-        data_filter,
-        applicability_domain,
+            self,
+            _,
+            name,
+            feature_calculators,
+            split,
+            feature_standardizer,
+            feature_filter,
+            data_filter,
+            applicability_domain,
     ):
         """Tests one combination of a data set and its preparation settings.
 
@@ -768,6 +770,7 @@ class TestDataSetPreparation(DataSetsPathMixIn, DataPrepCheckMixIn, QSPRTestCase
 
 class TestTargetImputation(PathMixIn, QSPRTestCase):
     """Small tests to only check if the target imputation works on its own."""
+
     def setUp(self):
         """Set up the test Dataframe."""
         super().setUp()
@@ -822,6 +825,7 @@ class TestTargetImputation(PathMixIn, QSPRTestCase):
 
 class TestTargetTransformation(DataSetsPathMixIn, QSPRTestCase):
     """Tests the transformation of target properties."""
+
     def setUp(self):
         super().setUp()
         self.setUpPaths()
@@ -849,6 +853,7 @@ class TestTargetTransformation(DataSetsPathMixIn, QSPRTestCase):
 
 class TestApply(DataSetsPathMixIn, QSPRTestCase):
     """Tests the apply method of the data set."""
+
     def setUp(self):
         super().setUp()
         self.setUpPaths()

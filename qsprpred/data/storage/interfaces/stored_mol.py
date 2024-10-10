@@ -11,6 +11,7 @@ class StoredMol(ABC):
     conformers, tautomers, or protomers of the parent molecule. Representations
     can also be used to encode docked poses with metadata attached as properties.
     """
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__} ({self.id}, {self.smiles})"
 
@@ -21,6 +22,15 @@ class StoredMol(ABC):
 
         Returns:
             The parent molecule of this representation as a `StoredMol` instance.
+        """
+
+    @parent.setter
+    @abstractmethod
+    def parent(self, parent: Optional["StoredMol"]):
+        """Set the parent molecule of this representation.
+
+        Args:
+            parent (StoredMol): The parent molecule of this representation.
         """
 
     @property
@@ -57,6 +67,15 @@ class StoredMol(ABC):
 
         Returns:
             list: The representations of the molecule.
+        """
+
+    @representations.setter
+    @abstractmethod
+    def representations(self, representations: list["StoredMol"] | None):
+        """Set the representations of the molecule.
+
+        Args:
+            representations (list): The representations of the molecule.
         """
 
     def as_rd_mol(self) -> Chem.Mol:
