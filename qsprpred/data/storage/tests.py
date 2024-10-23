@@ -11,7 +11,8 @@ from qsprpred.data.chem.identifiers import InchiIdentifier
 from qsprpred.data.chem.standardizers.check_smiles import CheckSmilesValid
 from qsprpred.data.chem.standardizers.papyrus import PapyrusStandardizer
 from qsprpred.data.storage.interfaces.chem_store import ChemStore
-from qsprpred.data.storage.tabular.hierarchical import PandasRepresentationStore
+from qsprpred.data.storage.tabular.hierarchical import PandasRepresentationStore, \
+    RepresentationMol
 from qsprpred.data.storage.tabular.simple import PandasChemStore
 
 
@@ -325,7 +326,7 @@ class TabularRepresentationStorageTest(StorageTest, TestCase):
             chem_store=self.main,
         )
 
-    def testAddRepresentations(self):
+    def addConformers(self, store):
         # generate conformers for each molecule in main store
         parent_ids = []
         sdfs = []
@@ -345,15 +346,38 @@ class TabularRepresentationStorageTest(StorageTest, TestCase):
                 smiles.append(mol.smiles)
                 sdfs.append(Chem.MolToMolBlock(rd_mol, confId=conf.GetId()))
         # add them as representations
-        store = self.getStorage()
         store.addMols(smiles, {
             "parent_id": parent_ids,
             "sdf": sdfs,
         })
         self.assertEqual(len(store.representations), len(parent_ids))
+
+    def testAddConformers(self):
+        store = self.getStorage()
+        self.addConformers(store)
         for mol in store:
             self.assertTrue(mol.representations)
             for rep in mol.representations:
                 mol = rep.as_rd_mol()
                 self.assertTrue(mol)
                 self.assertFalse(rep.representations)
+
+    @staticmethod
+    def check_representations(mols):
+        ret = []
+        for mol in mols:
+            reps = mol.representations
+            for rep in reps:
+                assert isinstance(rep, RepresentationMol)
+                ret.append(rep.as_rd_mol())
+        return ret
+
+    def testParallel(self):
+        store = self.getStorage()
+        self.addConformers(store)
+        # iterate in parallel and check that all conformers are valid rdkit molecules
+        store.nJobs = 2
+        for result in store.apply(self.check_representations):
+            for mol in result:
+                self.assertIsInstance(mol, Chem.Mol)
+                self.assertTrue(mol)

@@ -1,5 +1,7 @@
 import os
 import shutil
+import uuid
+from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Generator, Iterable, Literal, Sized
 
 import pandas as pd
@@ -11,7 +13,7 @@ from qsprpred.data.chem.standardizers import ChemStandardizer
 from qsprpred.data.chem.standardizers.base import ChemStandardizationException
 from qsprpred.data.processing.mol_processor import MolProcessor
 from qsprpred.data.storage.interfaces.chem_store import ChemStore
-from qsprpred.data.storage.interfaces.searchable import SMARTSSearchable
+from qsprpred.data.storage.interfaces.searchable import SMARTSSearchable, PropSearchable
 from qsprpred.data.storage.interfaces.stored_mol import StoredMol
 from qsprpred.data.storage.tabular.stored_mol import TabularMol
 from qsprpred.data.tables.pandas import PandasDataTable
@@ -19,12 +21,158 @@ from qsprpred.logs import logger
 from qsprpred.utils.interfaces.summarizable import Summarizable
 from qsprpred.utils.parallel import (
     MultiprocessingJITGenerator,
-    ParallelGenerator,
-    Parallelizable,
+    ParallelGenerator, Parallelizable,
 )
 
 
-class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable):
+class ParallelizedChemStore(
+    ChemStore,
+    SMARTSSearchable,
+    PropSearchable,
+    Summarizable,
+    Parallelizable,
+    ABC
+):
+    """Base class with default implementations of some parallel processing features
+    for `ChemStore` instances that want to support it. The mixin basically defines
+    some methods required by the `ChunkIterable` and `MolProcessable` interfaces to make
+    implementation of parallel processing for downstream instances of `ChemStore`
+    easier.
+    """
+
+    @property
+    @abstractmethod
+    def chunkProcessor(self) -> ParallelGenerator:
+        """Parallel generator to use for processing."""
+
+    def apply(
+            self,
+            func: callable,
+            func_args: list | None = None,
+            func_kwargs: dict | None = None,
+            on_props: tuple[str, ...] | None = None,
+            chunk_type: Literal["mol", "smiles", "rdkit", "df"] = "mol",
+            chunk_processor: ParallelGenerator | None = None,
+            no_parallel: bool = False,
+    ) -> Generator[Iterable[Any], None, None]:
+        """Apply a function to the molecules in the data frame.
+
+        Args:
+            func (callable): Function to apply to the molecules.
+            func_args (list, optional): Additional arguments to pass to the function.
+            func_kwargs (dict, optional):
+                Additional keyword arguments to pass to the function.
+            on_props (tuple, optional):
+                Properties to pass to the function. If `None`, all properties will be
+                passed.
+            chunk_type (str, optional):
+                Type of molecule to send to the function. Can be 'smiles', 'mol', or
+                'rdkit'. Defaults to 'mol', which implies `TabularMol` objects.
+            chunk_processor (ParallelGenerator, optional):
+                The parallel generator to use for processing. If not specified,
+                `self.chunkProcessor` is used.
+            no_parallel (bool, optional):
+                Whether to use parallel processing. Defaults to `False`.
+
+        Returns:
+            (Generator):
+                A generator that yields the results of the supplied function on the
+                chunked molecules from the data set.
+        """
+        chunk_processor = chunk_processor or self.chunkProcessor
+        func_args = func_args or []
+        func_kwargs = func_kwargs or {}
+        if self.nJobs > 1 and not no_parallel:
+            for result in chunk_processor(
+                    self.iterChunks(
+                        self.chunkSize, chunk_type=chunk_type, on_props=on_props
+                    ),
+                    func,
+                    *func_args,
+                    **func_kwargs,
+            ):
+                yield result
+        else:
+            # do not use the parallel generator if n_jobs is 1
+            for chunk in self.iterChunks(
+                    self.chunkSize, chunk_type=chunk_type, on_props=on_props
+            ):
+                yield func(chunk, *func_args, **func_kwargs)
+
+    def processMols(
+            self,
+            processor: MolProcessor,
+            proc_args: Iterable[Any] | None = None,
+            proc_kwargs: dict[str, Any] | None = None,
+            mol_type: Literal["smiles", "mol", "rdkit"] = "mol",
+            add_props: Iterable[str] | None = None,
+            chunk_processor: ParallelGenerator | None = None,
+    ) -> Generator:
+        """Apply a function to the molecules in the data frame.
+        The SMILES  or an RDKit molecule will be supplied as the first
+        positional argument to the function. Additional properties
+        to provide from the data set can be specified with 'add_props', which will be
+        a dictionary supplied as an additional positional argument to the function.
+
+        IMPORTANT: For successful parallel processing with `multiprocessing`,
+        the processor must be picklable.
+        Also note that
+        the returned generator may only produce results as soon as they are ready,
+        which means that the chunks of data may
+        not be in the same order as the original data frame. However, you can pass the
+        value of `idProp` in `add_props` to identify the processed molecules or
+        use `MolProcessorWithID` as the processor.
+
+        Args:
+            processor (MolProcessor):
+                `MolProcessor` object to use for processing.
+            proc_args (list, optional):
+                Any additional positional arguments to pass to the processor.
+            proc_kwargs (dict, optional):
+                Any additional keyword arguments to pass to the processor.
+            mol_type (str, optional):
+                Type of molecule to send to the processor. Can be 'smiles', 'mol', or
+                'rdkit'. Defaults to 'mol', which implies `TabularMol` objects.
+            add_props (list, optional):
+                List of data set properties to send to the processor. If `None`, all
+                properties will be sent.
+            chunk_processor (ParallelGenerator, optional):
+                The parallel generator to use for processing. If not specified,
+                `self.chunkProcessor` is used.
+
+        Returns:
+            Generator:
+                A generator that yields the results of the supplied processor on
+                the chunked molecules from the data set.
+        """
+        proc_args = proc_args or ()
+        proc_kwargs = proc_kwargs or {}
+        if add_props is None:
+            add_props = self.getProperties()
+        else:
+            add_props = list(add_props)
+        add_props = add_props + list(processor.requiredProps)
+        chunk_processor = chunk_processor or self.chunkProcessor
+        for prop in add_props:
+            if prop not in self.getProperties():
+                raise ValueError(
+                    f"Cannot apply function '{processor}' to {self} because "
+                    f"it requires the property '{prop}', which is not present in the "
+                    "data set."
+                )
+        for result in self.apply(
+                processor,
+                func_args=proc_args,
+                func_kwargs=proc_kwargs,
+                on_props=add_props,
+                chunk_type=mol_type,
+                chunk_processor=chunk_processor,
+                no_parallel=not processor.supportsParallel,
+        ):
+            yield result
+
+
+class PandasChemStore(ParallelizedChemStore):
     """Tabular storage for molecules. An example implementations of `ChemStore`
     that uses `PandasDataTable` to store the data.
 
@@ -116,6 +264,22 @@ class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable)
             )
         else:
             self.reload()
+
+    @property
+    def chunkProcessor(self) -> ParallelGenerator:
+        """Parallel generator to use for processing."""
+        return self._chunkProcessor
+
+    @chunkProcessor.setter
+    def chunkProcessor(self, value: ParallelGenerator):
+        """Set the parallel generator to use for processing.
+
+        Args:
+            value (ParallelGenerator): Parallel generator to use for processing.
+        """
+        self._chunkProcessor = value
+        for lib in self._libraries.values():
+            lib.chunkProcessor = value
 
     @property
     def libsPath(self):
@@ -485,7 +649,7 @@ class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable)
                 save=save,
             )
         else:
-            random_temp_name = f"{library}_temp"
+            random_temp_name = f"{library}_{uuid.uuid4().hex}"
             self.addLibrary(
                 name=random_temp_name,
                 df=df,
@@ -541,78 +705,6 @@ class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable)
         """
         os.makedirs(self.path, exist_ok=True)
         return self.toFile(self.metaFile)
-
-    def processMols(
-            self,
-            processor: MolProcessor,
-            proc_args: Iterable[Any] | None = None,
-            proc_kwargs: dict[str, Any] | None = None,
-            mol_type: Literal["smiles", "mol", "rdkit"] = "mol",
-            add_props: Iterable[str] | None = None,
-            chunk_processor: ParallelGenerator | None = None,
-    ) -> Generator:
-        """Apply a function to the molecules in the data frame.
-        The SMILES  or an RDKit molecule will be supplied as the first
-        positional argument to the function. Additional properties
-        to provide from the data set can be specified with 'add_props', which will be
-        a dictionary supplied as an additional positional argument to the function.
-
-        IMPORTANT: For successful parallel processing with `multiprocessing`,
-        the processor must be picklable.
-        Also note that
-        the returned generator may only produce results as soon as they are ready,
-        which means that the chunks of data may
-        not be in the same order as the original data frame. However, you can pass the
-        value of `idProp` in `add_props` to identify the processed molecules or
-        use `MolProcessorWithID` as the processor.
-
-        Args:
-            processor (MolProcessor):
-                `MolProcessor` object to use for processing.
-            proc_args (list, optional):
-                Any additional positional arguments to pass to the processor.
-            proc_kwargs (dict, optional):
-                Any additional keyword arguments to pass to the processor.
-            mol_type (str, optional):
-                Type of molecule to send to the processor. Can be 'smiles', 'mol', or
-                'rdkit'. Defaults to 'mol', which implies `TabularMol` objects.
-            add_props (list, optional):
-                List of data set properties to send to the processor. If `None`, all
-                properties will be sent.
-            chunk_processor (ParallelGenerator, optional):
-                The parallel generator to use for processing. If not specified,
-                `self.chunkProcessor` is used.
-
-        Returns:
-            Generator:
-                A generator that yields the results of the supplied processor on
-                the chunked molecules from the data set.
-        """
-        proc_args = proc_args or ()
-        proc_kwargs = proc_kwargs or {}
-        if add_props is None:
-            add_props = self.getProperties()
-        else:
-            add_props = list(add_props)
-        add_props = add_props + list(processor.requiredProps)
-        chunk_processor = chunk_processor or self.chunkProcessor
-        for prop in add_props:
-            if prop not in self.getProperties():
-                raise ValueError(
-                    f"Cannot apply function '{processor}' to {self.name} because "
-                    f"it requires the property '{prop}', which is not present in the "
-                    "data set."
-                )
-        for result in self.apply(
-                processor,
-                func_args=proc_args,
-                func_kwargs=proc_kwargs,
-                on_props=add_props,
-                chunk_type=mol_type,
-                chunk_processor=chunk_processor,
-                no_parallel=not processor.supportsParallel,
-        ):
-            yield result
 
     def getProperty(self, name: str, ids: list[str] | None = None) -> pd.Series:
         """Get a property from the storage.
@@ -718,8 +810,10 @@ class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable)
         """Reload the storage from disk."""
         self.__dict__.update(self.fromFile(self.metaFile).__dict__)
 
-    def clear(self):
+    def clear(self, files_only: bool = True):
         """Clear the storage."""
+        for lib in self._libraries.values():
+            lib.clear(files_only=files_only)
         if os.path.exists(self.path):
             shutil.rmtree(self.path)
 
@@ -727,60 +821,6 @@ class PandasChemStore(ChemStore, SMARTSSearchable, Summarizable, Parallelizable)
     def metaFile(self) -> str:
         """Path to the meta file."""
         return os.path.join(self.path, "meta.json")
-
-    def apply(
-            self,
-            func: callable,
-            func_args: list | None = None,
-            func_kwargs: dict | None = None,
-            on_props: tuple[str, ...] | None = None,
-            chunk_type: Literal["mol", "smiles", "rdkit", "df"] = "mol",
-            chunk_processor: ParallelGenerator | None = None,
-            no_parallel: bool = False,
-    ) -> Generator[Iterable[Any], None, None]:
-        """Apply a function to the molecules in the data frame.
-
-        Args:
-            func (callable): Function to apply to the molecules.
-            func_args (list, optional): Additional arguments to pass to the function.
-            func_kwargs (dict, optional):
-                Additional keyword arguments to pass to the function.
-            on_props (tuple, optional):
-                Properties to pass to the function. If `None`, all properties will be
-                passed.
-            chunk_type (str, optional):
-                Type of molecule to send to the function. Can be 'smiles', 'mol', or
-                'rdkit'. Defaults to 'mol', which implies `TabularMol` objects.
-            chunk_processor (ParallelGenerator, optional):
-                The parallel generator to use for processing. If not specified,
-                `self.chunkProcessor` is used.
-            no_parallel (bool, optional):
-                Whether to use parallel processing. Defaults to `False`.
-
-        Returns:
-            (Generator):
-                A generator that yields the results of the supplied function on the
-                chunked molecules from the data set.
-        """
-        chunk_processor = chunk_processor or self.chunkProcessor
-        func_args = func_args or []
-        func_kwargs = func_kwargs or {}
-        if self.nJobs > 1 and not no_parallel:
-            for result in chunk_processor(
-                    self.iterChunks(
-                        self.chunkSize, chunk_type=chunk_type, on_props=on_props
-                    ),
-                    func,
-                    *func_args,
-                    **func_kwargs,
-            ):
-                yield result
-        else:
-            # do not use the parallel generator if n_jobs is 1
-            for chunk in self.iterChunks(
-                    self.chunkSize, chunk_type=chunk_type, on_props=on_props
-            ):
-                yield func(chunk, *func_args, **func_kwargs)
 
     def searchOnProperty(
             self,
