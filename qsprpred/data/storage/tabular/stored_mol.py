@@ -11,6 +11,7 @@ class TabularMol(StoredMol):
     def __init__(
             self,
             mol_id: str,
+            origin: str,
             smiles: str,
             parent: Optional["TabularMol"] = None,
             rd_mol: Chem.Mol | None = None,
@@ -27,12 +28,17 @@ class TabularMol(StoredMol):
             props (dict, optional): properties of the molecule
             representations (tuple, optional): representations of the molecule
         """
+        self._origin = origin
         self._parent = parent
         self._id = mol_id
         self._smiles = smiles
         self._rd_mol = rd_mol
         self._props = props
         self._representations = representations
+
+    @property
+    def origin(self) -> str:
+        return self._origin
 
     def as_rd_mol(self) -> Chem.Mol:
         """Get the rdkit molecule object.

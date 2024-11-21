@@ -45,9 +45,6 @@ class PandasDataTable(PropertyStorage, Randomized):
             Set to `None` to again use the default value determined by `nJobs`.
         randomState (int):
             Random state to use for all random operations.
-        idProp (str):
-            Column name to use for automatically generated IDs. Defaults to 'QSPRID'.
-            If `indexCols` is set, this will be the names of the columns joined by '~'.
         storeFormat (str):
             Format to use for storing the data frame. Currently only
             'pkl' and 'csv' are supported. Defaults to 'pkl' because it is faster.
@@ -58,16 +55,6 @@ class PandasDataTable(PropertyStorage, Randomized):
             You can replace this with your own parallel generator function if you
             want to use a different parallelization strategy (i.e. utilize
             remote servers instead of local processes).
-        baseDir (str):
-            The base directory of the data set folder.
-        storeDir (str):
-            The data set folder containing the data set files after saving.
-        storePath (str):
-            The path to the main data set file.
-        storePrefix (str):
-            The prefix of the data set files.
-        metaFile (str):
-            The path to the meta file of this data set.
     """
 
     _notJSON: ClassVar = [*JSONSerializable._notJSON, "df"]
@@ -172,6 +159,16 @@ class PandasDataTable(PropertyStorage, Randomized):
         self.parallelGenerator = parallel_generator or MultiprocessingJITGenerator(
             self.nJobs
         )
+
+    @property
+    def name(self) -> str:
+        """Name of the data set."""
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        """Set the name of the data set."""
+        self._name = value
 
     @property
     def randomState(self) -> int:
@@ -762,8 +759,6 @@ class PandasDataTable(PropertyStorage, Randomized):
                 f"Duplicate entries found: {duplicates}. Resolve them or "
                 "set `raise_on_existing=False` to ignore the new duplicate entries."
             )
-        else:
-            logger.warning(f"Duplicate entries found: {duplicates}. Ignoring them.")
         for dup in duplicates[self.idProp]:
             idx = ids.index(dup)
             ids.remove(dup)

@@ -110,7 +110,7 @@ class MoleculeTable(MoleculeDataSet, Parallelizable):
     def name(self, name: str):
         """Set the name of the data set."""
         self._name = name
-        self.path = os.path.abspath(os.path.join(self.rootDir, self.name))
+        self.path = os.path.abspath(os.path.join(self.rootDir, self.name)) + os.sep
 
     def sample(
             self,

@@ -64,8 +64,9 @@ class PandasRepresentationStore(
     ) -> None:
         super().__init__()
         self.storage = chem_store
+        self.rootDir = path
+        self.path = os.path.abspath(os.path.join(self.rootDir, name))
         self.name = name
-        self.path = path
         if df is not None:
             raise NotImplementedError(
                 "Supplying an initial set of representations is not yet supported."
@@ -102,6 +103,17 @@ class PandasRepresentationStore(
         else:
             logger.info(f"Loading representation store at {self.baseDir}")
             self.reload()
+
+    @property
+    def name(self) -> str:
+        """Name of the data set."""
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        """Set the name of the data set."""
+        self._name = value
+        self.path = os.path.abspath(os.path.join(self.rootDir, value))
 
     @property
     def nJobs(self) -> int:
@@ -152,7 +164,8 @@ class PandasRepresentationStore(
             mol = self.storage.getMol(mol_id)
         children = list(self.representations.searchOnProperty(
             "parent_id",
-            [mol_id],
+            [mol.id],
+            name=self.name,
             exact=True
         )) or None
         if children is not None:
@@ -184,10 +197,18 @@ class PandasRepresentationStore(
 
         Returns:
             (StoredMol):
-                molecule with all its representations attached to its `representations` attribute
+                molecule with all its representations
+                attached to its `representations` attribute
         """
-        mol = self.storage.getMol(mol_id)
-        reps = self.getRepresentations(mol_id, is_root=True)
+        try:
+            is_root = True
+            mol = self.storage.getMol(mol_id)
+        except ValueError:
+            is_root = False
+            mol = self.representations.getMol(mol_id)
+            mol.parent = self.getMol(mol.props["parent_id"])
+
+        reps = self.getRepresentations(mol_id, is_root=is_root)
         self._attach_reps_to_mol(mol, reps)
         return mol
 

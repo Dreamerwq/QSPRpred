@@ -4,6 +4,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Generator, Iterable, Literal, Sized
 
+import numpy as np
 import pandas as pd
 from rdkit import Chem
 
@@ -232,8 +233,9 @@ class PandasChemStore(ParallelizedChemStore):
                 f"Column '{smiles_col}' not found in the data frame. "
                 "Please provide a valid column name for the SMILES representations."
             )
+        self.rootDir = path
+        self.path = os.path.abspath(os.path.join(self.rootDir, name))
         self.name = name
-        self.path = os.path.abspath(os.path.join(path, self.name))
         self.storeFormat = store_format
         self._libraries = {}
         self.nJobs = n_jobs
@@ -264,6 +266,17 @@ class PandasChemStore(ParallelizedChemStore):
             )
         else:
             self.reload()
+
+    @property
+    def name(self) -> str:
+        """Name of the data set."""
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        """Set the name of the data set."""
+        self._name = value
+        self.path = os.path.abspath(os.path.join(self.rootDir, value))
 
     @property
     def chunkProcessor(self) -> ParallelGenerator:
@@ -638,6 +651,12 @@ class PandasChemStore(ParallelizedChemStore):
         if props:
             data.update(props)
         df = pd.DataFrame(data)
+        if len(df) == 0:
+            logger.warning(
+                "No new or valid molecules detected in the list of SMILES."
+                "Nothing will be added to the store."
+            )
+            return []
         library = library or f"{self.name}_library"
         if library not in self._libraries:
             self.addLibrary(
@@ -873,7 +892,7 @@ class PandasChemStore(ParallelizedChemStore):
         name = name or f"{self.name}_{prop_name}_searched"
         if value_type is str:
             prop = self.getProperty(prop_name)
-            mask = [False] * len(prop)
+            mask = np.array([False] * len(prop))
             for value in values:
                 mask = (
                     mask | (prop.str.contains(value)) if not exact else mask |
@@ -1018,7 +1037,7 @@ class PandasChemStore(ParallelizedChemStore):
                     for prop in lib.getProperties()
                 }
                 break
-        return TabularMol(mol_id, smiles.iloc[0], props=props)
+        return TabularMol(mol_id, self.name, smiles.iloc[0], props=props)
 
     def removeMol(self, mol_id):
         """Remove a molecule from the store.
@@ -1107,7 +1126,7 @@ class PandasChemStore(ParallelizedChemStore):
                     for prop in on_props
                 } if props else None
             )
-            mols.append(TabularMol(_id, smiles.iloc[idx], props=mol_props))
+            mols.append(TabularMol(_id, self.name, smiles.iloc[idx], props=mol_props))
         return mols
 
     def _convert_chunk_smiles(self, chunk: pd.DataFrame, on_props: list) -> list[str]:

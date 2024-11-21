@@ -15,6 +15,18 @@ class StoredMol(ABC):
     def __str__(self) -> str:
         return f"{self.__class__.__name__} ({self.id}, {self.smiles})"
 
+    def __eq__(self, other: "StoredMol") -> bool:
+        return self.id == other.id
+
+    @property
+    @abstractmethod
+    def origin(self) -> str:
+        """Get the name of the storage where the molecule resides.
+
+        Returns:
+            str: The name of the storage.
+        """
+
     @property
     @abstractmethod
     def parent(self) -> Optional["StoredMol"]:
