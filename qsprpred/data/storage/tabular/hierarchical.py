@@ -379,6 +379,10 @@ class PandasRepresentationStore(
     def chunkSize(self) -> int:
         return self.representations.chunkSize
 
+    @chunkSize.setter
+    def chunkSize(self, chunk_size: int):
+        self.representations.chunkSize = chunk_size
+
     def searchWithSMARTS(self, patterns: list[str]) -> "PandasRepresentationStore":
         # FIXME: return a new instance of this store
         return self.representations.searchWithSMARTS(patterns)

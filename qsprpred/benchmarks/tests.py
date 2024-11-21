@@ -4,9 +4,10 @@ from sklearn.model_selection import KFold
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVR
 
 from qsprpred.models.assessment.methods import CrossValAssessor, TestSetAssessor
-
+from . import BenchmarkRunner, BenchmarkSettings, DataPrepSettings
 from .. import TargetProperty, TargetTasks
 from ..data import MoleculeTable, QSPRTable
 from ..data.descriptors.sets import RDKitDescs
@@ -15,13 +16,13 @@ from ..models.scikit_learn import SklearnModel
 from ..utils.stringops import get_random_string
 from ..utils.testing.base import QSPRTestCase
 from ..utils.testing.path_mixins import DataSetsPathMixIn
-from . import BenchmarkRunner, BenchmarkSettings, DataPrepSettings
 
 
 class DataSourceTesting(DataSetsPathMixIn, DataSource):
     """Data source for testing purposes. Simply prepares the default
     data set from`DataSetsPathMixIn`.
     """
+
     def __init__(self, name):
         super().__init__()
         self.setUpPaths()
@@ -32,10 +33,10 @@ class DataSourceTesting(DataSetsPathMixIn, DataSource):
         return self.createLargeTestDataSet(name)
 
     def getDataSet(
-        self,
-        target_props: list[TargetProperty | dict],
-        name: str | None = None,
-        **kwargs,
+            self,
+            target_props: list[TargetProperty | dict],
+            name: str | None = None,
+            **kwargs,
     ) -> QSPRTable:
         name = name or self.name
         return self.createLargeTestDataSet(name, target_props=target_props)
@@ -50,6 +51,7 @@ class BenchMarkTestCase(DataSetsPathMixIn, QSPRTestCase):
         benchmark (BenchmarkRunner):
             Benchmark runner.
     """
+
     def setUp(self):
         super().setUp()
         self.setUpPaths()
@@ -128,6 +130,7 @@ class BenchMarkTestCase(DataSetsPathMixIn, QSPRTestCase):
             self.settings,
             data_dir=f"{self.generatedPath}/benchmarks",
             results_file=f"{self.generatedPath}/benchmarks/results.tsv",
+            # parallel_generator_cpu=MultiprocessingJITGenerator(1),
         )
 
     def checkRunResults(self, results):
@@ -177,14 +180,22 @@ class BenchmarkingTest(BenchMarkTestCase):
         ]
         self.settings.models = [
             SklearnModel(
+                name="SVR",
+                alg=SVR,
+                base_dir=f"{self.generatedPath}/models",
+                parameters={"kernel": "rbf"},
+            ),
+            SklearnModel(
                 name="RandomForestRegressor",
                 alg=RandomForestRegressor,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
             SklearnModel(
                 name="KNeighborsRegressor",
                 alg=KNeighborsRegressor,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
         ]
         self.settings.assessors = [
@@ -231,11 +242,13 @@ class BenchmarkingTest(BenchMarkTestCase):
                 name="RandomForestClassifier",
                 alg=RandomForestClassifier,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
             SklearnModel(
                 name="KNeighborsClassifier",
                 alg=KNeighborsClassifier,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
         ]
         self.settings.assessors = [
@@ -286,11 +299,13 @@ class BenchmarkingTest(BenchMarkTestCase):
                 name="RandomForestRegressor",
                 alg=RandomForestRegressor,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
             SklearnModel(
                 name="KNeighborsRegressor",
                 alg=KNeighborsRegressor,
                 base_dir=f"{self.generatedPath}/models",
+                parameters={"n_jobs": 1},
             ),
         ]
         self.settings.assessors = [
