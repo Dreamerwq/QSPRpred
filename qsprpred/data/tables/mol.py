@@ -693,9 +693,9 @@ class MoleculeTable(MoleculeDataSet, Parallelizable):
             if before != after:
                 logger.warning(
                     f"Descriptor set {calculator} has been reduced from "
-                    f"{len(before)} to {len(after)} descriptors."
+                    f"{before} to {after} descriptors."
                     "Returned data frame contained more columns than expected."
-                    f"Extra columns: {set(before) - set(after)}"
+                    f"Extra columns: {set(cols) - set(df_descriptors.columns)}"
                 )
             df_descriptors = df_descriptors[[*calculator.descriptors,
                                              self.idProp]]
