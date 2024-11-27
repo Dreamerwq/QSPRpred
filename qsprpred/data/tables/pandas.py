@@ -68,7 +68,7 @@ class PandasDataTable(PropertyStorage, Randomized):
             index_cols: list[str] | None = None,
             n_jobs: int = 1,
             chunk_size: int | None = None,
-            autoindex_name: str = "ID",
+            autoindex_name: str | None = None,
             random_state: int | None = None,
             store_format: str = "pkl",
             parallel_generator: ParallelGenerator | None = None,
@@ -116,7 +116,6 @@ class PandasDataTable(PropertyStorage, Randomized):
                 want to use a different parallelization strategy (i.e. utilize
                 remote servers instead of local processes).
         """
-        self._idProp = autoindex_name
         self.storeFormat = store_format
         self.randomState = None
         self.randomState = random_state or int(
@@ -129,6 +128,7 @@ class PandasDataTable(PropertyStorage, Randomized):
         # data frame initialization
         self.df = None
         if df is not None:
+            self._idProp = autoindex_name or f"{name}_ID"
             if self._isInStore("df") and not overwrite:
                 logger.warning(
                     "Existing data set found, but also found a data frame in store. "
@@ -322,7 +322,7 @@ class PandasDataTable(PropertyStorage, Randomized):
         self.df[self.idProp] = self.df[self.indexCols].apply(
             lambda x: "~".join(map(str, x.tolist())), axis=1
         )
-        self.df.set_index(self.idProp, inplace=True, verify_integrity=True, drop=False)
+        self.df.set_index(self.idProp, inplace=True, verify_integrity=False, drop=False)
         self.df.drop(
             inplace=True,
             columns=[c for c in self.df.columns if c.startswith("Unnamed")],
