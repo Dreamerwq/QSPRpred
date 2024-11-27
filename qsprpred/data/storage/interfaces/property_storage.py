@@ -176,7 +176,7 @@ class PropertyStorage(DataStorage, ChunkIterable, PropSearchable, ABC):
         return self.dropEntries((key,))
 
     def __str__(self):
-        return f"{self.__class__.__name__} ({len(self)})"
+        return f"{self.__class__.__name__} ({self.name})"
 
     def __repr__(self):
         return str(self)
