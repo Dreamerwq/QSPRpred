@@ -17,10 +17,9 @@ from rdkit.Chem import Lipinski, Mol
 from rdkit.ML.Descriptors import MoleculeDescriptors
 
 from qsprpred.data.storage.interfaces.stored_mol import StoredMol
-
+from ..processing.mol_processor import MolProcessorWithID
 from ...logs import logger
 from ...utils.serialization import JSONSerializable
-from ..processing.mol_processor import MolProcessorWithID
 
 
 class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
@@ -33,6 +32,7 @@ class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
             whether the descriptor set supports parallel calculation
         dtype: data type of the descriptor values
     """
+
     @staticmethod
     def treatInfs(df: pd.DataFrame) -> pd.DataFrame:
         """Replace infinite values by NaNs.
@@ -136,7 +136,7 @@ class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
         return np.float32
 
     def parsePropsAndMols(
-        self, mols: list[str | Mol], props: dict[str, list[Any]] | None
+            self, mols: list[str | Mol], props: dict[str, list[Any]] | None
     ) -> tuple[list[Mol], dict[str, list[Any]]]:
         """Parse the properties and molecules passed to the descriptor set.
 
@@ -163,16 +163,16 @@ class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
         else:
             rd_mols = self.iterMols(mols, to_list=True)
             assert (
-                props is not None
+                    props is not None
             ), "Required properties must be provided if not using a StoredMol instance. See the `requiredProps` property."
         return rd_mols, props
 
     def __call__(
-        self,
-        mols: list[str | Mol | StoredMol],
-        props: dict[str, list[Any]] | None = None,
-        *args,
-        **kwargs,
+            self,
+            mols: list[str | Mol | StoredMol],
+            props: dict[str, list[Any]] | None = None,
+            *args,
+            **kwargs,
     ) -> pd.DataFrame:
         """Calculate the descriptors for a list of molecules and convert them
         to a data frame with the molecule IDs as index. The values are converted
@@ -204,10 +204,18 @@ class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
         assert len(set(self.descriptors)) == len(
             self.descriptors
         ), f"Descriptor names are not unique for set '{self}': {self.descriptors}"
+        if self.idProp in self.descriptors:
+            col_idx = self.descriptors.index(self.idProp)
+            index = pd.Index(values[:, col_idx], name=self.idProp)
+            values = values[:, :col_idx]  # remove the id column
+            self.descriptors = self.descriptors[:col_idx] + self.descriptors[
+                                                            col_idx + 1:]
+        else:
+            index = pd.Index(props[self.idProp], name=self.idProp)
         df = pd.DataFrame(
             values,
-            index=pd.Index(props[self.idProp], name=self.idProp),
-            columns=self.transformToFeatureNames(),
+            index=index,
+            columns=self.descriptors,
         )
         try:
             df = df.astype(self.dtype)
@@ -235,7 +243,7 @@ class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
 
     @abstractmethod
     def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Method to calculate descriptors for a list of molecules.
 
@@ -264,6 +272,7 @@ class DataFrameDescriptorSet(DescriptorSet):
         _cols (list): list of columns to use as the new multi-index
         _descriptors (list): list of descriptor names
     """
+
     @staticmethod
     def setIndex(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         """Create a multi-index from several columns of the data set.
@@ -282,11 +291,11 @@ class DataFrameDescriptorSet(DescriptorSet):
         return df
 
     def __init__(
-        self,
-        df: pd.DataFrame,
-        joining_cols: list[str] | None = None,
-        suffix: str = "",
-        source_is_multi_index: bool = False,
+            self,
+            df: pd.DataFrame,
+            joining_cols: list[str] | None = None,
+            suffix: str = "",
+            source_is_multi_index: bool = False,
     ):
         """Initialize the descriptor set with a dataframe of descriptors.
 
@@ -341,7 +350,7 @@ class DataFrameDescriptorSet(DescriptorSet):
         return self._cols if self._df is not None else None
 
     def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Return the descriptors for the input molecules. It simply searches
         for descriptor values in the data frame using the `idProp` as index.
@@ -501,8 +510,9 @@ class RDKitDescs(DescriptorSet):
         descriptors (list): list of RDKit descriptors to calculate
         include3D (bool): include 3D descriptors
     """
+
     def __init__(
-        self, rdkit_descriptors: list[str] | None = None, include_3d: bool = False
+            self, rdkit_descriptors: list[str] | None = None, include_3d: bool = False
     ):
         """Initialize the descriptorset with a list of RDKit descriptors to calculate.
 
@@ -537,7 +547,7 @@ class RDKitDescs(DescriptorSet):
         self.include3D = include_3d
 
     def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Calculate the RDKit descriptors for a molecule.
 
@@ -590,12 +600,13 @@ class TanimotoDistances(DescriptorSet):
         _kwargs: `fingerprint` keyword arguments, should contain fingerprint_type
 
     """
+
     def __init__(
-        self,
-        list_of_smiles: list[str],
-        fingerprint_type: Type["Fingerprint"],  # noqa: F821
-        *args,
-        **kwargs,
+            self,
+            list_of_smiles: list[str],
+            fingerprint_type: Type["Fingerprint"],  # noqa: F821
+            *args,
+            **kwargs,
     ):
         """Initialize the descriptorset with a list of SMILES sequences and a
         fingerprint type.
@@ -617,7 +628,7 @@ class TanimotoDistances(DescriptorSet):
         self.fps = self.calculate_fingerprints(list_of_smiles)
 
     def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Calculate the Tanimoto distances to the list of SMILES sequences.
 
@@ -644,7 +655,7 @@ class TanimotoDistances(DescriptorSet):
         )
 
     def calculate_fingerprints(
-        self, list_of_smiles: list[str]
+            self, list_of_smiles: list[str]
     ) -> list[DataStructs.ExplicitBitVect]:
         """Calculate the fingerprints for the list of SMILES sequences
 
@@ -723,7 +734,7 @@ class PredictorDesc(DescriptorSet):
         self.model = QSPRModel.fromFile(self.model)
 
     def getDescriptors(
-        self, mols: list[str | Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[str | Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Calculate the descriptor for a list of molecules.
 
@@ -759,6 +770,7 @@ class SmilesDesc(DescriptorSet):
     Attributes:
         descriptors (list): list of descriptor
     """
+
     @staticmethod
     def treatInfs(df: pd.DataFrame) -> pd.DataFrame:
         """handle infinite values in the dataframe
@@ -771,7 +783,7 @@ class SmilesDesc(DescriptorSet):
         return df
 
     def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+            self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
     ) -> np.ndarray:
         """Return smiles as descriptors.
 

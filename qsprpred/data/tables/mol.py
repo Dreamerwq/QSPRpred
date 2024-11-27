@@ -684,18 +684,23 @@ class MoleculeTable(MoleculeDataSet, Parallelizable):
                 result[self.idProp] = result.index.values
                 df_descriptors.append(result)
             df_descriptors = pd.concat(df_descriptors, axis=0)
-            before = list(df_descriptors.columns)
-            df_descriptors = df_descriptors[[
-                *calculator.transformToFeatureNames(), self.idProp
-            ]]
-            after = list(df_descriptors.columns)
-            if len(before) != len(after):
+            cols = df_descriptors.columns.tolist()
+            if len(calculator.descriptors) == 0:
+                calculator.descriptors = [x for x in cols if x != self.idProp]
+            before = len(cols) - 1
+            df_descriptors = df_descriptors[[*calculator.descriptors, self.idProp]]
+            after = len(df_descriptors.columns) - 1
+            if before != after:
                 logger.warning(
                     f"Descriptor set {calculator} has been reduced from "
                     f"{len(before)} to {len(after)} descriptors."
                     "Returned data frame contained more columns than expected."
                     f"Extra columns: {set(before) - set(after)}"
                 )
+            df_descriptors = df_descriptors[[*calculator.descriptors,
+                                             self.idProp]]
+            df_descriptors.columns = [*calculator.transformToFeatureNames(),
+                                      self.idProp]
             self.attachDescriptors(calculator, df_descriptors, [self.idProp])
 
     def getDescriptors(self, active_only: bool = True) -> pd.DataFrame:
@@ -704,12 +709,14 @@ class MoleculeTable(MoleculeDataSet, Parallelizable):
         Returns:
             pd.DataFrame: Data frame containing only descriptors.
         """
-        ret = pd.DataFrame(
-            index=pd.Index(self.getProperty(self.idProp), name=self.idProp)
-        )
+        ret = None
         for descriptors in self.descriptors:
             df_descriptors = descriptors.getDescriptors(active_only=active_only)
-            ret = ret.join(df_descriptors, how="left")
+            ret = ret.join(df_descriptors,
+                           how="left") if ret is not None else df_descriptors
+        if ret is None:
+            ret = pd.DataFrame(
+                index=pd.Index(self.getProperty(self.idProp), name=self.idProp))
         return ret
 
     def getDescriptorNames(self) -> list[str]:
