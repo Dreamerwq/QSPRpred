@@ -18,6 +18,7 @@ from ..tasks import ModelTasks
 
 class RegressionPlot(ModelPlot, ABC):
     """Base class for all regression plots."""
+
     def getSupportedTasks(self) -> list[ModelTasks]:
         """Return a list of supported model tasks."""
         return [ModelTasks.REGRESSION, ModelTasks.MULTITASK_REGRESSION]
@@ -38,7 +39,9 @@ class RegressionPlot(ModelPlot, ABC):
                 columns: QSPRID, Fold, Property, Label, Prediction, Set
         """
         # change all property columns into one column
-        id_vars = ["ID", "Fold"] if "Fold" in assessment_df.columns else ["ID"]
+        id_vars = [assessment_df.columns[0],
+                   "Fold"] if "Fold" in assessment_df.columns else [
+            assessment_df.columns[0]]
         df = assessment_df.melt(id_vars=id_vars)
         # split the variable (<property_name>_<suffixes>_<Label/Prediction>) column
         # into the property name and the type (Label or Prediction)
@@ -66,21 +69,17 @@ class RegressionPlot(ModelPlot, ABC):
                 the dataframe containing the regression results,
                 columns: Model, QSPRID, Fold, Property, Label, Prediction, Set
         """
-        model_results = {}
+        model_results = []
         for m, model in enumerate(self.models):
             # Read in and prepare the cross-validation and independent test set results
             df_cv = self.prepareAssessment(pd.read_table(self.cvPaths[model]))
             df_ind = self.prepareAssessment(pd.read_table(self.indPaths[model]))
             # concatenate the cross-validation and independent test set results
             df = pd.concat([df_cv, df_ind])
-            print(model.name)
-            model_results[model.name] = df
+            df["Model"] = model.name
+            model_results.append(df)
         # concatenate the results from all models and add the model name as a column
-        df = (
-            pd.concat(
-                model_results.values(), keys=model_results.keys(), names=["Model"]
-            ).reset_index(level=1, drop=True).reset_index()
-        )
+        df = pd.concat(model_results)
 
         self.results = df
         return df
@@ -113,11 +112,12 @@ class RegressionPlot(ModelPlot, ABC):
 
 class CorrelationPlot(RegressionPlot):
     """Class to plot the results of regression models. Plot predicted pX_train vs real pX_train."""
+
     def make(
-        self,
-        save: bool = True,
-        show: bool = False,
-        out_path: str | None = None,
+            self,
+            save: bool = True,
+            show: bool = False,
+            out_path: str | None = None,
     ) -> tuple[sns.FacetGrid, pd.DataFrame]:
         """Plot the results of regression models. Plot predicted pX_train vs real pX_train.
 
@@ -186,15 +186,16 @@ class CorrelationPlot(RegressionPlot):
 
 class WilliamsPlot(RegressionPlot):
     """Williams plot; plot of standardized residuals versus leverages"""
+
     def __init__(self, models: list[QSPRModel], datasets: list[QSPRDataSet]):
         super().__init__(models)
         self.datasets = datasets
 
     def make(
-        self,
-        save: bool = True,
-        show: bool = False,
-        out_path: str | None = None,
+            self,
+            save: bool = True,
+            show: bool = False,
+            out_path: str | None = None,
     ) -> tuple[sns.FacetGrid, pd.DataFrame, List[float]]:
         """make Williams plot
 
@@ -215,8 +216,9 @@ class WilliamsPlot(RegressionPlot):
             dict[str, float]:
                 the h* values for the datasets
         """
+
         def calculateLeverages(
-            features_train: pd.DataFrame, features_test: pd.DataFrame
+                features_train: pd.DataFrame, features_test: pd.DataFrame
         ) -> pd.DataFrame:
             """Calculate the leverages for each compound in the dataset.
 
@@ -292,7 +294,8 @@ class WilliamsPlot(RegressionPlot):
 
         # Add the levarages to the dataframe
         df["leverage"] = df.apply(
-            lambda x: model_leverages[x["Model"]][x["ID"]], axis=1
+            lambda x: model_leverages[x["Model"]][
+                x[model_leverages[x["Model"]].index.name]], axis=1
         )
         df["n_features"] = df["Model"].apply(lambda x: model_p[x])
 
@@ -319,7 +322,7 @@ class WilliamsPlot(RegressionPlot):
                         "number of samples should be greater than the number of features."
                     )
                 RSE[(model, property)] = np.sqrt(
-                    (1 / df_["df"].iloc[0]) * np.sum(df_["residual"]**2)
+                    (1 / df_["df"].iloc[0]) * np.sum(df_["residual"] ** 2)
                 )
 
         # add the residual standard error to the df
@@ -364,6 +367,6 @@ class WilliamsPlot(RegressionPlot):
         plt.clf()
         return (
             g,
-            df[["Model", "Fold", "Property", "leverage", "std_resid", "ID"]],
+            df[["Model", "Fold", "Property", "leverage", "std_resid", df.columns[0]]],
             model_h_star,
         )
