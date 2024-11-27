@@ -316,19 +316,26 @@ class PandasRepresentationStore(
         return self.storage.idProp
 
     def getProperty(self, name: str, ids: tuple[str] | None = None) -> Iterable[Any]:
-        return self.representations.getProperty(name, ids)
+        if self.representations.hasProperty(name):
+            return self.representations.getProperty(name, ids)
+        if self.storage.hasProperty(name):
+            return self.storage.getProperty(name, ids)
+        raise ValueError(f"Property '{name}' not found in storage.")
 
     def getProperties(self) -> list[str]:
-        return self.representations.getProperties()
+        return self.storage.getProperties() + self.representations.getProperties()
 
     def addProperty(self, name: str, data: Sized, ids: list[str] | None = None):
         return self.representations.addProperty(name, data, ids)
 
     def hasProperty(self, name: str) -> bool:
-        return self.representations.hasProperty(name)
+        return self.representations.hasProperty(name) or self.storage.hasProperty(name)
 
     def removeProperty(self, name: str):
-        return self.representations.removeProperty(name)
+        if self.representations.hasProperty(name):
+            return self.representations.removeProperty(name)
+        if self.storage.hasProperty(name):
+            return self.storage.removeProperty(name)
 
     def getSubset(self, subset: Iterable[str],
                   ids: Iterable[str] | None = None) -> "PandasRepresentationStore":
