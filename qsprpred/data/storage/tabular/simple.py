@@ -146,6 +146,8 @@ class ParallelizedChemStore(
                 A generator that yields the results of the supplied processor on
                 the chunked molecules from the data set.
         """
+        if hasattr(processor, "idProp"):
+            processor.idProp = self.idProp
         proc_args = proc_args or ()
         proc_kwargs = proc_kwargs or {}
         if add_props is None:
@@ -199,7 +201,8 @@ class PandasChemStore(ParallelizedChemStore):
             save: bool = False,
             standardizer=None,
             identifier=None,
-            id_col: str = "ID",
+            id_col: str | None = None,
+            autoindex_name: str | None = None,
             store_format: str = "pkl",
             chunk_processor: ParallelGenerator = None,
             chunk_size: int | None = None,
@@ -249,6 +252,7 @@ class PandasChemStore(ParallelizedChemStore):
         if overwrite and os.path.exists(self.metaFile):
             self.clear()
         if not os.path.exists(self.metaFile):
+            self._idProp = autoindex_name or f"{self.name}_ID"
             columns = [
                 self.idProp,
                 self.smilesProp,
@@ -314,7 +318,16 @@ class PandasChemStore(ParallelizedChemStore):
         """Name of the property containing unique molecule IDs.
         The values are determined by the attached `identifier`.
         """
-        return "ID"
+        return self._idProp
+
+    @idProp.setter
+    def idProp(self, value: str):
+        """Set the name of the property containing unique molecule IDs.
+
+        Args:
+            value (str): Name of the property.
+        """
+        self._idProp = value
 
     @property
     def chunkSize(self) -> int:
@@ -356,7 +369,7 @@ class PandasChemStore(ParallelizedChemStore):
             name: str,
             df: pd.DataFrame,
             smiles_col: str = "SMILES",
-            id_col: str = "ID",
+            id_col: str | None = None,
             add_rdkit=False,
             store_format="pkl",
             save=False,
@@ -811,6 +824,7 @@ class PandasChemStore(ParallelizedChemStore):
             standardizer=None,
             identifier=None,
             id_col=self.idProp,
+            autoindex_name=self.idProp,
             smiles_col=self.smilesProp,
             chunk_size=self.chunkSize,
             n_jobs=self.nJobs,

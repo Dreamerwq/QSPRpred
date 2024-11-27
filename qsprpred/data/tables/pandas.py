@@ -153,6 +153,7 @@ class PandasDataTable(PropertyStorage, Randomized):
                 )
             self.reload()
         assert self.df is not None, "Unknown error in data set creation."
+        self._idProp = self.df.index.name
         # parallel settings
         self.nJobs = n_jobs
         self.chunkSize = chunk_size

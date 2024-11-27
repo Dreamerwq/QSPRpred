@@ -93,7 +93,6 @@ class PandasRepresentationStore(
                 ),
                 smiles_col=self.smilesProp,
                 add_rdkit=add_rdkit,
-                id_col=self.idProp,
                 overwrite=overwrite,
                 store_format=store_format,
                 chunk_processor=chunk_processor,
