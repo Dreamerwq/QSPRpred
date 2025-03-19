@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from .base import QSPRModelGPU
+from base import QSPRModelGPU
 
 # set default number of threads to 1
 torch.set_num_threads(1)

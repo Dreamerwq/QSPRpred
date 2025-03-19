@@ -12,12 +12,12 @@ import torch
 from sklearn.model_selection import ShuffleSplit
 
 from qsprpred.tasks import ModelTasks
-from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
-from ....data.sampling.splits import DataSplit
-from ....data.tables.qspr import QSPRDataset
-from ....extra.gpu.models.neural_network import STFullyConnected, Base
-from ....models.early_stopping import EarlyStoppingMode, early_stopping
-from ....models.monitors import BaseMonitor, FitMonitor
+from base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
+from qsprpred.data.sampling.splits import DataSplit
+from qsprpred.data.tables.qspr import QSPRDataset
+from neural_network import STFullyConnected, Base
+from qsprpred.models.early_stopping import EarlyStoppingMode, early_stopping
+from qsprpred.models.monitors import BaseMonitor, FitMonitor
 
 
 class DNNModel(QSPRModelPyTorchGPU):
@@ -126,6 +126,7 @@ class DNNModel(QSPRModelPyTorchGPU):
             autoload=autoload,
             random_state=random_state,
         )
+
         self.setGPUs(gpus)
 
     def initRandomState(self, random_state):

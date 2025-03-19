@@ -1232,3 +1232,5 @@ class QSPRDataset(MoleculeTable):
         logger.info(
             f"Marked {(~mask).sum().sum()} samples from the test set as outlier."
         )
+
+#%%
