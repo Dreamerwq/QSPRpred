@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from qsprpred.models.monitors import BaseMonitor, FitMonitor
 # from ....logs import logger
 # from ....models.monitors import BaseMonitor, FitMonitor
-
+print("test")
 class Base(nn.Module):
     """Base structure for all classification/regression DNN models.
 
