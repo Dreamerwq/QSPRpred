@@ -3,6 +3,7 @@ This module holds the base class for DNN models
 as well as fully connected NN subclass.
 """
 
+
 import inspect
 from collections import defaultdict
 
@@ -12,9 +13,9 @@ from torch import nn, optim
 from torch.nn import functional as f
 from torch.utils.data import DataLoader, TensorDataset
 
-from qsprpred.models.monitors import BaseMonitor, FitMonitor
-# from ....logs import logger
-# from ....models.monitors import BaseMonitor, FitMonitor
+from ....logs import logger
+from ....models.monitors import BaseMonitor, FitMonitor
+
 print("test")
 class Base(nn.Module):
     """Base structure for all classification/regression DNN models.
