@@ -12,11 +12,12 @@ import torch
 from torch import nn, optim
 from torch.nn import functional as f
 from torch.utils.data import DataLoader, TensorDataset
-
+print("test")
+from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
 from ....logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
 
-print("test")
+
 class Base(nn.Module):
     """Base structure for all classification/regression DNN models.
 
