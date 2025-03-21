@@ -3,7 +3,6 @@ This module holds the base class for DNN models
 as well as fully connected NN subclass.
 """
 
-
 import inspect
 from collections import defaultdict
 
@@ -12,6 +11,7 @@ import torch
 from torch import nn, optim
 from torch.nn import functional as f
 from torch.utils.data import DataLoader, TensorDataset
+
 print("test")
 from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
 from ....logs import logger
@@ -53,7 +53,7 @@ class Base(nn.Module):
             patience: int = 50,
             tol: float = 0,
             weight_decay: float = 1e-4,
-
+            random_seed=42
     ):
         """Initialize the DNN model.
 
@@ -84,6 +84,7 @@ class Base(nn.Module):
         self.device = torch.device(device)
         self.gpus = gpus
         self.weight_decay = weight_decay
+        self.random_seed = random_seed
 
     def fit(
             self,
@@ -366,7 +367,7 @@ class STFullyConnected(Base):
             n_class,
             device,
             gpus,
-            act_fun = f.relu,
+            act_fun=f.relu,
             n_epochs=100,
             lr=None,
             batch_size=256,
@@ -375,9 +376,11 @@ class STFullyConnected(Base):
             is_reg=True,
             neurons_h1=256,
             neurons_hx=128,
+            neuron_layers=[256, 128, 128],
             extra_layer=False,
             dropout_frac=0.25,
             weight_decay=0,
+            random_seed=42
     ):
         """Initialize the STFullyConnected model.
 
@@ -437,6 +440,8 @@ class STFullyConnected(Base):
         self.fc1 = None
         self.fc2 = None
         self.fc3 = None
+        self.neuron_layers = neuron_layers
+        self.layers = []
         self.final_layer_activation = None
         self.criterion = None
         self.act_fun = act_fun
@@ -446,6 +451,17 @@ class STFullyConnected(Base):
     def initModel(self):
         """Define the layers of the model."""
         # self.optimizer = torch.optim.Adam()
+        torch.manual_seed(self.random_seed)
+        print(self.neuron_layers)
+        print(self.neuron_layers[-1])
+        self.layers = nn.ModuleList()
+        self.layers.append(nn.Linear(self.n_dim, self.neuron_layers[0]))
+        for i in range(1, len(self.neuron_layers)):
+            self.layers.append(nn.Linear(self.neuron_layers[i - 1], self.neuron_layers[i]))
+        self.layers.append(nn.Linear(self.neuron_layers[-1], self.n_class))
+
+        print(self.layers)
+
         self.dropout = nn.Dropout(self.dropout_frac)
         self.fc0 = nn.Linear(self.n_dim, self.neurons_h1)
         self.fc1 = nn.Linear(self.neurons_h1, self.neurons_hx)
@@ -463,6 +479,7 @@ class STFullyConnected(Base):
             # loss and activation function of output layer for multiple classification
             self.criterion = nn.CrossEntropyLoss()
             self.final_layer_activation = nn.Softmax(dim=1)
+        print(self.fc0, self.fc1, self.fc2, self.fc3)
 
     def set_params(self, **params) -> "STFullyConnected":
         """Set parameters and re-initialize model.
@@ -491,201 +508,35 @@ class STFullyConnected(Base):
             y (FloatTensor): m X n FloatTensor, m is the No. of samples,
                 n is the No. of classes
         """
-        y = self.act_fun(self.fc0(X))
-        if is_train:
-            y = self.dropout(y)
-        y = self.act_fun(self.fc1(y))
-        if self.extra_layer:
+
+        y = self.act_fun(self.layers[0](X))
+        for i in range(1, len(self.layers) - 1):
+            y = self.act_fun(self.layers[i](y))
             if is_train:
-                y = self.dropout(y)
-            y = self.act_fun(self.fc2(y))
-        if is_train:
-            y = self.dropout(y)
+                y = self.dropout(y)  # Apply dropout only during training
+ # Apply activation after each layer
+
+        # Final output layer, either for regression or classification
         if self.is_reg:
-            y = self.fc3(y)
+            # If regression, no activation on the final layer (identity function)
+            y = self.layers[-1](y)
         else:
-            y = self.final_layer_activation(self.fc3(y))
+            # If classification, apply the final layer activation (e.g., Softmax, Sigmoid)
+            y = self.final_layer_activation(self.layers[-1](y))
+        xd = y
+        # y = self.act_fun(self.fc0(X))
+        # if is_train:
+        #     y = self.dropout(y)
+        # y = self.act_fun(self.fc1(y))
+        # if self.extra_layer:
+        #     if is_train:
+        #         y = self.dropout(y)
+        #     y = self.act_fun(self.fc2(y))
+        # if is_train:
+        #     y = self.dropout(y)
+        # if self.is_reg:
+        #     y = self.fc3(y)
+        # else:
+        #     y = self.final_layer_activation(self.fc3(y))
+        # print(xd, y)
         return y
-# class STFullyConnected(Base):
-#     """Single task DNN classification/regression model.
-#
-#     It contains four fully connected layers between which are
-#     dropout layers for robustness.
-#
-#     Attributes:
-#         n_dim (int): the No. of columns (features) for input tensor
-#         n_class (int): the No. of columns (classes) for output tensor.
-#         device (torch.cude): device to run the model on
-#         gpus (list): list of gpu ids to run the model on
-#         n_epochs (int): max number of epochs
-#         lr (float): neural net learning rate
-#         batch_size (int): batch size for training
-#         patience (int): early stopping patience
-#         tol (float): early stopping tolerance
-#         is_reg (bool): whether the model is for regression or classification
-#         neurons_h1 (int): No. of neurons in the first hidden layer
-#         neurons_hx (int): No. of neurons in the second hidden layer
-#         extra_layer (bool): whether to add an extra hidden layer
-#         dropout_frac (float): dropout fraction
-#         criterion (torch.nn.Module): the loss function
-#         dropout (torch.nn.Module): the dropout layer
-#         fc0 (torch.nn.Module): the first fully connected layer
-#         fc1 (torch.nn.Module): the second fully connected layer
-#         fc2 (torch.nn.Module): the third fully connected layer
-#         fc3 (torch.nn.Module): the fourth fully connected layer
-#         final_layer_activation (torch.nn.Module): the activation function
-#     """
-#
-#     def __init__(
-#             self,
-#             n_dim,
-#             n_class,
-#             device,
-#             gpus,
-#             act_fun = f.relu,
-#             n_epochs=100,
-#             lr=None,
-#             batch_size=256,
-#             patience=50,
-#             tol=0,
-#             is_reg=True,
-#             neurons_h1=256,
-#             neurons_hx=128,
-#             extra_layer=False,
-#             dropout_frac=0.25,
-#             weight_decay=0,
-#     ):
-#         """Initialize the STFullyConnected model.
-#
-#         Args:
-#             n_dim (int):
-#                 the No. of columns (features) for input tensor
-#             n_class (int):
-#                 the No. of columns (classes) for output tensor.
-#             device (torch.cude):
-#                 device to run the model on
-#             gpus (list):
-#                 list of gpu ids to run the model on
-#             n_epochs (int):
-#                 max number of epochs
-#             lr (float):
-#                 neural net learning rate
-#             batch_size (int):
-#                 batch size
-#             patience (int):
-#                 number of epochs to wait before early stop if no progress on
-#                 validation set score, if patience = -1, always train to n_epochs
-#             tol (float):
-#                 minimum absolute improvement of loss necessary to
-#                 count as progress on best validation score
-#             is_reg (bool, optional):
-#                 Regression model (True) or Classification model (False)
-#             neurons_h1 (int):
-#                 number of neurons in first hidden layer
-#             neurons_hx (int):
-#                 number of neurons in other hidden layers
-#             extra_layer (bool):
-#                 add third hidden layer
-#             dropout_frac (float):
-#                 dropout fraction
-#         """
-#         if not lr:
-#             lr = 1e-4 if is_reg else 1e-5
-#         super().__init__(
-#             device=device,
-#             gpus=gpus,
-#             n_epochs=n_epochs,
-#             lr=lr,
-#             batch_size=batch_size,
-#             patience=patience,
-#             tol=tol,
-#         )
-#         self.n_dim = n_dim
-#         self.is_reg = is_reg
-#         self.n_class = n_class if not self.is_reg else 1
-#         self.neurons_h1 = neurons_h1
-#         self.neurons_hx = neurons_hx
-#         self.extra_layer = extra_layer
-#         self.dropout_frac = dropout_frac
-#         self.dropout = None
-#         self.fc0 = None
-#         self.fc1 = None
-#         self.fc2 = None
-#         self.fc3 = None
-#         self.fc4 = None
-#         self.final_layer_activation = None
-#         self.criterion = None
-#         self.weight_decay = weight_decay
-#         self.act_fun = act_fun
-#         self.initModel()
-#
-#     def initModel(self):
-#         """Define the layers of the model."""
-#         self.dropout = nn.Dropout(self.dropout_frac)
-#         self.fc0 = nn.Linear(self.n_dim, self.neurons_h1)
-#         self.fc1 = nn.Linear(self.neurons_h1, self.neurons_hx)
-#         self.fc2 = nn.Linear(self.neurons_hx, self.neurons_hx)
-#         if self.extra_layer:
-#             self.fc3 = nn.Linear(self.neurons_hx, self.neurons_hx)
-#         self.fc4 = nn.Linear(self.neurons_hx, self.n_class)
-#         if self.is_reg:
-#             # loss function for regression
-#             self.criterion = nn.MSELoss()
-#         elif self.n_class == 1:
-#             # loss and activation function of output layer for binary classification
-#             self.criterion = nn.BCELoss()
-#             self.final_layer_activation = nn.Sigmoid()
-#         else:
-#             # loss and activation function of output layer for multiple classification
-#             self.criterion = nn.CrossEntropyLoss()
-#             self.final_layer_activation = nn.Softmax(dim=1)
-#
-#     def set_params(self, **params) -> "STFullyConnected":
-#         """Set parameters and re-initialize model.
-#
-#         Args:
-#             **params: parameters to be set
-#
-#         Returns:
-#             self (STFullyConnected): the model itself
-#         """
-#         super().set_params(**params)
-#         self.initModel()
-#         return self
-#
-#     def forward(self, X, is_train=False) -> torch.Tensor:
-#         """Invoke the class directly as a function.
-#
-#         Args:
-#             X (FloatTensor):
-#                 m X n FloatTensor, m is the No. of samples, n is
-#                 the No. of features.
-#             is_train (bool, optional):
-#                 is it invoked during training process (True) or
-#                 just for prediction (False)
-#         Returns:
-#             y (FloatTensor): m X n FloatTensor, m is the No. of samples,
-#                 n is the No. of classes
-#         """
-#         y = self.act_fun(self.fc0(X))
-#         if is_train:
-#             y = self.dropout(y)
-#         y = self.act_fun(self.fc1(y))
-#         y = self.act_fun(self.fc2(y))
-#         if self.extra_layer:
-#             if is_train:
-#                 y = self.dropout(y)
-#             y = self.act_fun(self.fc3(y))
-#         if is_train:
-#             y = self.dropout(y)
-#         if self.is_reg:
-#             y = self.fc4(y)
-#         else:
-#             y = self.final_layer_activation(self.fc4(y))
-#         return y
-
-
-
-
-
-
