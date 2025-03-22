@@ -12,7 +12,6 @@ from torch import nn, optim
 from torch.nn import functional as f
 from torch.utils.data import DataLoader, TensorDataset
 
-print("test")
 from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
 from ....logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
@@ -376,7 +375,7 @@ class STFullyConnected(Base):
             is_reg=True,
             neurons_h1=256,
             neurons_hx=128,
-            neuron_layers=[256, 128, 128],
+            neuron_layers=None,
             extra_layer=False,
             dropout_frac=0.25,
             weight_decay=0,
@@ -416,6 +415,8 @@ class STFullyConnected(Base):
             dropout_frac (float):
                 dropout fraction
         """
+        if neuron_layers is None:
+            neuron_layers = [2048, 1024]
         if not lr:
             lr = 1e-4 if is_reg else 1e-5
         super().__init__(
@@ -452,15 +453,11 @@ class STFullyConnected(Base):
         """Define the layers of the model."""
         # self.optimizer = torch.optim.Adam()
         torch.manual_seed(self.random_seed)
-        print(self.neuron_layers)
-        print(self.neuron_layers[-1])
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(self.n_dim, self.neuron_layers[0]))
         for i in range(1, len(self.neuron_layers)):
             self.layers.append(nn.Linear(self.neuron_layers[i - 1], self.neuron_layers[i]))
         self.layers.append(nn.Linear(self.neuron_layers[-1], self.n_class))
-
-        print(self.layers)
 
         self.dropout = nn.Dropout(self.dropout_frac)
         self.fc0 = nn.Linear(self.n_dim, self.neurons_h1)
@@ -479,7 +476,6 @@ class STFullyConnected(Base):
             # loss and activation function of output layer for multiple classification
             self.criterion = nn.CrossEntropyLoss()
             self.final_layer_activation = nn.Softmax(dim=1)
-        print(self.fc0, self.fc1, self.fc2, self.fc3)
 
     def set_params(self, **params) -> "STFullyConnected":
         """Set parameters and re-initialize model.
@@ -514,29 +510,11 @@ class STFullyConnected(Base):
             y = self.act_fun(self.layers[i](y))
             if is_train:
                 y = self.dropout(y)  # Apply dropout only during training
- # Apply activation after each layer
 
-        # Final output layer, either for regression or classification
         if self.is_reg:
             # If regression, no activation on the final layer (identity function)
             y = self.layers[-1](y)
         else:
             # If classification, apply the final layer activation (e.g., Softmax, Sigmoid)
             y = self.final_layer_activation(self.layers[-1](y))
-        xd = y
-        # y = self.act_fun(self.fc0(X))
-        # if is_train:
-        #     y = self.dropout(y)
-        # y = self.act_fun(self.fc1(y))
-        # if self.extra_layer:
-        #     if is_train:
-        #         y = self.dropout(y)
-        #     y = self.act_fun(self.fc2(y))
-        # if is_train:
-        #     y = self.dropout(y)
-        # if self.is_reg:
-        #     y = self.fc3(y)
-        # else:
-        #     y = self.final_layer_activation(self.fc3(y))
-        # print(xd, y)
         return y

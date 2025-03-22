@@ -2085,11 +2085,15 @@
                             },
                             {
                                 "py/tuple": [
-                                    "REGRESSION"
+                                    "SINGLECLASS"
                                 ]
                             }
                         ]
                     },
+                    "_th": [
+                        6.5
+                    ],
+                    "_nClasses": 2,
                     "imputer": null,
                     "transformer": null
                 }
