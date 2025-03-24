@@ -347,16 +347,11 @@ class STFullyConnected(Base):
         patience (int): early stopping patience
         tol (float): early stopping tolerance
         is_reg (bool): whether the model is for regression or classification
-        neurons_h1 (int): No. of neurons in the first hidden layer
-        neurons_hx (int): No. of neurons in the second hidden layer
-        extra_layer (bool): whether to add an extra hidden layer
         dropout_frac (float): dropout fraction
         criterion (torch.nn.Module): the loss function
         dropout (torch.nn.Module): the dropout layer
-        fc0 (torch.nn.Module): the first fully connected layer
-        fc1 (torch.nn.Module): the second fully connected layer
-        fc2 (torch.nn.Module): the third fully connected layer
-        fc3 (torch.nn.Module): the fourth fully connected layer
+        neuron_layers (list(nn.Linear)): List of neuron layers
+        act_fun (torch.nn.Functional): the activation function
         final_layer_activation (torch.nn.Module): the activation function
     """
 
@@ -373,10 +368,7 @@ class STFullyConnected(Base):
             patience=50,
             tol=0,
             is_reg=True,
-            neurons_h1=256,
-            neurons_hx=128,
             neuron_layers=None,
-            extra_layer=False,
             dropout_frac=0.25,
             weight_decay=0,
             random_seed=42
@@ -432,15 +424,8 @@ class STFullyConnected(Base):
         self.n_dim = n_dim
         self.is_reg = is_reg
         self.n_class = n_class if not self.is_reg else 1
-        self.neurons_h1 = neurons_h1
-        self.neurons_hx = neurons_hx
-        self.extra_layer = extra_layer
         self.dropout_frac = dropout_frac
         self.dropout = None
-        self.fc0 = None
-        self.fc1 = None
-        self.fc2 = None
-        self.fc3 = None
         self.neuron_layers = neuron_layers
         self.layers = []
         self.final_layer_activation = None
@@ -458,13 +443,7 @@ class STFullyConnected(Base):
         for i in range(1, len(self.neuron_layers)):
             self.layers.append(nn.Linear(self.neuron_layers[i - 1], self.neuron_layers[i]))
         self.layers.append(nn.Linear(self.neuron_layers[-1], self.n_class))
-
         self.dropout = nn.Dropout(self.dropout_frac)
-        self.fc0 = nn.Linear(self.n_dim, self.neurons_h1)
-        self.fc1 = nn.Linear(self.neurons_h1, self.neurons_hx)
-        if self.extra_layer:
-            self.fc2 = nn.Linear(self.neurons_hx, self.neurons_hx)
-        self.fc3 = nn.Linear(self.neurons_hx, self.n_class)
         if self.is_reg:
             # loss function for regression
             self.criterion = nn.MSELoss()
