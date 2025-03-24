@@ -165,6 +165,7 @@ class DNNModel(QSPRModelPyTorchGPU):
             model (object): model instance
         """
         if self.nClass is None or self.nDim is None:
+            print("lol")
             return "Uninitialized model."
         # initialize model
         estimator = self.alg(
