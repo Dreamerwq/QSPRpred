@@ -2,7 +2,7 @@
 This module holds the base class for DNN models
 as well as fully connected NN subclass.
 """
-
+print("lol")
 import inspect
 from collections import defaultdict
 
