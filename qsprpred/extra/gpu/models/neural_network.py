@@ -52,7 +52,8 @@ class Base(nn.Module):
             patience: int = 50,
             tol: float = 0,
             weight_decay: float = 1e-4,
-            random_seed=42
+            random_seed=42,
+            optimizer = optim.AdamW
     ):
         """Initialize the DNN model.
 
@@ -84,6 +85,7 @@ class Base(nn.Module):
         self.gpus = gpus
         self.weight_decay = weight_decay
         self.random_seed = random_seed
+        self.optimizer = optimizer
 
     def fit(
             self,
@@ -130,7 +132,8 @@ class Base(nn.Module):
         if "optim" in self.__dict__:
             optimizer = self.optim
         else:
-            optimizer = optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            optimizer = self.optimizer(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            #optimizer = optim.SparseAdam(self.parameters(), lr=self.lr)
         # record the minimum loss value based on the calculation of the
         # loss function by the current epoch
         best_loss = np.inf
@@ -371,7 +374,8 @@ class STFullyConnected(Base):
             neuron_layers=None,
             dropout_frac=0.25,
             weight_decay=0,
-            random_seed=42
+            random_seed=42,
+            optimizer=optim.AdamW
     ):
         """Initialize the STFullyConnected model.
 
@@ -419,7 +423,8 @@ class STFullyConnected(Base):
             batch_size=batch_size,
             patience=patience,
             tol=tol,
-            weight_decay=weight_decay
+            weight_decay=weight_decay,
+            optimizer=optimizer
         )
         self.n_dim = n_dim
         self.is_reg = is_reg
