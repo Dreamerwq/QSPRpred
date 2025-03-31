@@ -53,7 +53,8 @@ class Base(nn.Module):
             tol: float = 0,
             weight_decay: float = 1e-4,
             random_seed=42,
-            optimizer = optim.AdamW
+            optimizer = optim.AdamW,
+            seed=42
     ):
         """Initialize the DNN model.
 
@@ -76,6 +77,7 @@ class Base(nn.Module):
                 on best validation score
         """
         super().__init__()
+        self.set_seed(seed=seed)
         self.n_epochs = n_epochs
         self.lr = lr
         self.batch_size = batch_size
@@ -86,6 +88,7 @@ class Base(nn.Module):
         self.weight_decay = weight_decay
         self.random_seed = random_seed
         self.optimizer = optimizer
+
 
     def fit(
             self,
@@ -332,6 +335,11 @@ class Base(nn.Module):
             tensordataset = TensorDataset(torch.Tensor(X), torch.Tensor(y))
         return DataLoader(tensordataset, batch_size=self.batch_size)
 
+    @staticmethod
+    def set_seed(seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+
 
 class STFullyConnected(Base):
     """Single task DNN classification/regression model.
@@ -375,7 +383,8 @@ class STFullyConnected(Base):
             dropout_frac=0.25,
             weight_decay=0,
             random_seed=42,
-            optimizer=optim.AdamW
+            optimizer=optim.AdamW,
+            seed = 42
     ):
         """Initialize the STFullyConnected model.
 
@@ -424,7 +433,8 @@ class STFullyConnected(Base):
             patience=patience,
             tol=tol,
             weight_decay=weight_decay,
-            optimizer=optimizer
+            optimizer=optimizer,
+            seed= seed
         )
         self.n_dim = n_dim
         self.is_reg = is_reg
@@ -442,7 +452,6 @@ class STFullyConnected(Base):
     def initModel(self):
         """Define the layers of the model."""
         # self.optimizer = torch.optim.Adam()
-        torch.manual_seed(self.random_seed)
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(self.n_dim, self.neuron_layers[0]))
         for i in range(1, len(self.neuron_layers)):
