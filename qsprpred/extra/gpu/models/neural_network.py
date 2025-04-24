@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
 from ....logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
-
+from torch.optim.lr_scheduler import *
 
 class Base(nn.Module):
     """Base structure for all classification/regression DNN models.
@@ -90,6 +90,7 @@ class Base(nn.Module):
         self.optimizer = optimizer
 
 
+
     def fit(
             self,
             X_train,
@@ -98,93 +99,82 @@ class Base(nn.Module):
             y_valid=None,
             monitor: FitMonitor | None = None,
     ) -> int:
-        """Training the DNN model.
-
-        Training is, similar to the scikit-learn or Keras style.
-        It saves the optimal value of parameters.
-
-        Args:
-            X_train (np.ndarray or pd.Dataframe):
-                training data (m X n), m is the No. of samples, n is the No. of features
-            y_train (np.ndarray or pd.Dataframe):
-                training target (m X l), m is the No. of samples, l is
-                the No. of classes or tasks
-            X_valid (np.ndarray or pd.Dataframe):
-                validation data (m X n), m is the No. of samples, n is
-                the No. of features
-            y_valid (np.ndarray or pd.Dataframe):
-                validation target (m X l), m is the No. of samples, l is
-                the No. of classes or tasks
-            monitor (FitMonitor):
-                monitor to use for training, if None, use base monitor
-
-        Returns:
-            int:
-                the epoch number when the optimal model is saved
-        """
         self.to(self.device)
         monitor = BaseMonitor() if monitor is None else monitor
         train_loader = self.getDataLoader(X_train, y_train)
         valid_loader = None
-        # if validation data is provided, use early stopping
+    
         if X_valid is not None and y_valid is not None:
             valid_loader = self.getDataLoader(X_valid, y_valid)
             patience = self.patience
         else:
             patience = -1
+    
         if "optim" in self.__dict__:
             optimizer = self.optim
         else:
-            optimizer = self.optimizer(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-            #optimizer = optim.SparseAdam(self.parameters(), lr=self.lr)
-        # record the minimum loss value based on the calculation of the
-        # loss function by the current epoch
+            optimizer = self.optimizer(self.parameters(), lr=self.lr)#, 
+    
         best_loss = np.inf
         best_weights = self.state_dict()
-        last_save = 0  # record the epoch when optimal model is saved.
+        last_save = 0
+    
+        # Vytvoření OneCycleLR scheduleru
+        steps_per_epoch = len(train_loader)
+        total_steps = self.n_epochs * steps_per_epoch
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=self.lr * 10, 
+           total_steps=total_steps,
+            pct_start=0.3,  
+            anneal_strategy="cos",  
+            final_div_factor=1e4,
+            div_factor=25.0,
+        )
+    
         for epoch in range(self.n_epochs):
             monitor.onEpochStart(epoch)
             loss = None
-            # decrease learning rate over the epochs
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = self.lr * (1 - 1 / self.n_epochs) ** (epoch * 10)
             for i, (Xb, yb) in enumerate(train_loader):
                 monitor.onBatchStart(i)
-                # Batch of target tenor and label tensor
                 Xb, yb = Xb.to(self.device), yb.to(self.device)
                 optimizer.zero_grad()
-                # predicted probability tensor
+    
                 y_ = self(Xb, is_train=True)
-                # ignore all the NaN values
                 ix = yb == yb
                 if self.n_class > 1:
                     yb, y_ = yb[ix], y_[ix[:, -1], :]
                 else:
                     yb, y_ = yb[ix], y_[ix]
-                # loss function calculation based on predicted tensor and label tensor
+    
                 if self.n_class > 1:
                     loss = self.criterion(y_, yb.long())
                 else:
                     loss = self.criterion(y_, yb)
                 loss.backward()
                 optimizer.step()
+                scheduler.step()  
                 monitor.onBatchEnd(i, float(loss))
+    
             if patience == -1:
                 monitor.onEpochEnd(epoch, loss.item())
             else:
-                # loss value on validation set based on which optimal model is saved.
                 loss_valid = self.evaluate(valid_loader)
+                print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f}")
                 if loss_valid + self.tol < best_loss:
                     best_weights = self.state_dict()
                     best_loss = loss_valid
                     last_save = epoch
-                elif epoch - last_save > patience:  # early stop
+                elif epoch - last_save > patience:
                     break
                 monitor.onEpochEnd(epoch, loss.item(), loss_valid)
+    
         if patience == -1:
             best_weights = self.state_dict()
         self.load_state_dict(best_weights)
         return self, last_save
+
+
 
     def evaluate(self, loader) -> float:
         """Evaluate the performance of the DNN model.
