@@ -114,7 +114,12 @@ class Base(nn.Module):
             optimizer = self.optim
         else:
             optimizer = self.optimizer(self.parameters(), lr=self.lr)#, 
-    
+            
+        y_tensor = torch.tensor(y_train, dtype=torch.float32)
+        pos_weight_val = (y_tensor == 0).sum() / (y_tensor == 1).sum()
+        pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32).to(self.device)
+        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        
         best_loss = np.inf
         best_weights = self.state_dict()
         last_save = 0
