@@ -17,6 +17,7 @@ from ....logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
 from torch.optim.lr_scheduler import *
 
+
 class Base(nn.Module):
     """Base structure for all classification/regression DNN models.
 
@@ -114,12 +115,11 @@ class Base(nn.Module):
             optimizer = self.optim
         else:
             optimizer = self.optimizer(self.parameters(), lr=self.lr)#, 
-            
-        y_tensor = torch.tensor(y_train, dtype=torch.float32)
+        y_tensor = torch.tensor(y_train.values, dtype=torch.float32)
         pos_weight_val = (y_tensor == 0).sum() / (y_tensor == 1).sum()
         pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32).to(self.device)
-        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        
+        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)    
+    
         best_loss = np.inf
         best_weights = self.state_dict()
         last_save = 0
@@ -164,7 +164,7 @@ class Base(nn.Module):
             if patience == -1:
                 monitor.onEpochEnd(epoch, loss.item())
             else:
-                loss_valid = self.evaluate(valid_loader)
+                loss_valid = self.evaluate(valid_loader) 
                 print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f}")
                 if loss_valid + self.tol < best_loss:
                     best_weights = self.state_dict()
