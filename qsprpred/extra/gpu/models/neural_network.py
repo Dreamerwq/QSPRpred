@@ -16,6 +16,7 @@ from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
 from ....logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
 from torch.optim.lr_scheduler import *
+from sklearn.metrics import matthews_corrcoef
 
 
 class Base(nn.Module):
@@ -121,6 +122,7 @@ class Base(nn.Module):
         self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)    
     
         best_loss = np.inf
+        best_mcc = -1
         best_weights = self.state_dict()
         last_save = 0
     
@@ -164,13 +166,18 @@ class Base(nn.Module):
             if patience == -1:
                 monitor.onEpochEnd(epoch, loss.item())
             else:
-                loss_valid = self.evaluate(valid_loader) 
-                print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f}")
-                if loss_valid + self.tol < best_loss:
+                valid_pred = self.predict(valid_loader) > 0.5
+                loss_valid = self.evaluate(valid_loader)
+                mcc_val = matthews_corrcoef(valid_pred, y_valid)
+                print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f} | MCC: {mcc_val}")
+                #if loss_valid + self.tol < best_loss:
+                if mcc_val > best_mcc:
                     best_weights = self.state_dict()
                     best_loss = loss_valid
+                    best_mcc = mcc_val
                     last_save = epoch
                 elif epoch - last_save > patience:
+                    print(f"Finishing on epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f} | MCC: {mcc_val}")
                     break
                 monitor.onEpochEnd(epoch, loss.item(), loss_valid)
     
