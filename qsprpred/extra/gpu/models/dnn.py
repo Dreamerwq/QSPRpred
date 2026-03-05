@@ -113,6 +113,8 @@ class DNNModel(QSPRModelPyTorchGPU):
                 minimum absolute improvement of loss necessary to count as progress
                 on best validation score. Defaults to 0.
         """
+        print("local dnn.")
+ 
         self.device = None
         self.gpus = None
         self.patience = patience
@@ -127,7 +129,6 @@ class DNNModel(QSPRModelPyTorchGPU):
             autoload=autoload,
             random_state=random_state,
         )
-
         self.setGPUs(gpus)
 
     def initRandomState(self, random_state):
@@ -155,7 +156,7 @@ class DNNModel(QSPRModelPyTorchGPU):
         if data is not None:
             self.nDim = data.getFeatures()[0].shape[1]
 
-    def loadEstimator(self, params: dict | None = None) -> object:
+    def loadEstimator(self, params: dict | None = None) -> object: 
         """Load model from file or initialize new model.
 
         Args:
@@ -165,9 +166,9 @@ class DNNModel(QSPRModelPyTorchGPU):
             model (object): model instance
         """
         if self.nClass is None or self.nDim is None:
-            print("lol")
             return "Uninitialized model."
-        # initialize model
+        if params is None:
+            params = self.parameters
         estimator = self.alg(
             n_dim=self.nDim,
             n_class=self.nClass,
@@ -175,7 +176,8 @@ class DNNModel(QSPRModelPyTorchGPU):
             gpus=self.gpus,
             is_reg=self.task == ModelTasks.REGRESSION,
             patience=self.patience,
-            tol=self.tol,
+            tol=self.tol, 
+            **params
         )
         # set parameters if available and return
         new_parameters = self.getParameters(params)
@@ -193,7 +195,6 @@ class DNNModel(QSPRModelPyTorchGPU):
             fallback_load (bool):
                 if `True`, init estimator from `alg` and `params` if no estimator
                 found at path
-
         Returns:
             estimator (object): estimator instance
         """

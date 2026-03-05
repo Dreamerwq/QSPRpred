@@ -12,11 +12,12 @@ from torch import nn, optim
 from torch.nn import functional as f
 from torch.utils.data import DataLoader, TensorDataset
 
-from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
-from ....logs import logger
+#from .base_torch import QSPRModelPyTorchGPU, DEFAULT_TORCH_GPUS
+from qsprpred.logs import logger
 from ....models.monitors import BaseMonitor, FitMonitor
 from torch.optim.lr_scheduler import *
 from sklearn.metrics import matthews_corrcoef
+import copy
 
 
 class Base(nn.Module):
@@ -26,6 +27,8 @@ class Base(nn.Module):
     predicting the given data.
 
     Attributes:
+        device (torch.device):
+            device to run the model on
         n_epochs (int):
             (maximum) number of epochs to train the model
         lr (float):
@@ -36,49 +39,55 @@ class Base(nn.Module):
             number of epochs to wait before early stop if no progress on validation
             set score, if patience = -1, always train to `n_epochs`
         tol (float):
-            minimum absolute improvement of loss necessary to count as progress
+            minimum absolute improvement of metric necessary to count as progress
             on best validation score
-        device (torch.device):
-            device to run the model on
-        gpus (list):
-            list of gpus to run the model on
+        seed (int):
+            
     """
 
     def __init__(
             self,
-            device: str,
-            gpus: list[int],
+            device: str = "cpu",
             n_epochs: int = 1000,
             lr: float = 1e-4,
             batch_size: int = 256,
             patience: int = 50,
             tol: float = 0,
             weight_decay: float = 1e-4,
-            random_seed=42,
             optimizer = optim.AdamW,
-            seed=42
+            seed=69,
+            print_outputs = 0 # 0: No output, >0: print final output, >1: print each epoch output
     ):
-        """Initialize the DNN model.
-
+        """
+        Initialize the DNN model with training configuration.
         Args:
-            device (str):
-                device to run the model on
-            gpus (list):
-                list of gpus to run the model on
-            n_epochs (int):
-                (maximum) number of epochs to train the model
-            lr (float):
-                learning rate
-            batch_size (int):
-                batch size
-            patience (int):
-                number of epochs to wait before early stop if no progress on validation
-                set score, if patience = -1, always train to `n_epochs`
-            tol (float):
-                minimum absolute improvement of loss necessary to count as progress
-                on best validation score
+            device (str): 
+                Device to run the model on ('cpu', 'cuda',...).
+            n_epochs (int): 
+                Maximum number of training epochs.
+            lr (float): 
+                Learning rate for the optimizer.
+            batch_size (int): 
+                Number of samples per training batch.
+            patience (int): 
+                Number of epochs to wait for improvement on validation loss before early stopping.
+                If set to -1, training continues for all `n_epochs` regardless of validation performance.
+            tol (float): 
+                Minimum improvement in validation loss to be considered as progress.
+            weight_decay (float): 
+                Weight decay (L2 penalty) for the optimizer.
+            optimizer (torch.optim.Optimizer): 
+                Optimizer class to use for training (default: 'torch.optim.AdamW').
+            seed (int): 
+                Random seed for reproducibility.
+            print_outputs (int): 
+                Verbosity level for training outputs.
+                0 = No output,
+                >0 = Output after final epoch,
+                >1 = Output after every epoch.
         """
         super().__init__()
+        self.seed = seed
         self.set_seed(seed=seed)
         self.n_epochs = n_epochs
         self.lr = lr
@@ -86,10 +95,9 @@ class Base(nn.Module):
         self.patience = patience
         self.tol = tol
         self.device = torch.device(device)
-        self.gpus = gpus
         self.weight_decay = weight_decay
-        self.random_seed = random_seed
         self.optimizer = optimizer
+        self.print_outputs = print_outputs
 
 
 
@@ -101,40 +109,52 @@ class Base(nn.Module):
             y_valid=None,
             monitor: FitMonitor | None = None,
     ) -> int:
+        """
+        Train the model on the provided training data with optional validation and early stopping.
+        Args:
+            X_train (pd.DataFrame or torch.Tensor): 
+                Training features.
+            y_train (pd.Series or torch.Tensor): 
+                Training labels.
+            X_valid (pd.DataFrame or torch.Tensor, optional): 
+                Validation features for monitoring performance (default: None).
+            y_valid (pd.Series or torch.Tensor, optional): 
+                Validation labels (default: None).
+            monitor (FitMonitor, optional): 
+                Custom training monitor for logging and callbacks (default: BaseMonitor()).
+        Returns:
+            tuple:
+                - self: the trained model.
+                - last_save (int): the epoch index of the best model (based on validation loss).
+        """
         self.to(self.device)
+    
         monitor = BaseMonitor() if monitor is None else monitor
+
+
         train_loader = self.getDataLoader(X_train, y_train)
-        valid_loader = None
+        valid_loader = self.getDataLoader(X_valid, y_valid) if X_valid is not None and y_valid is not None else None
+        
+        patience = self.patience if valid_loader is not None else -1
+        optimizer = self.optim if "optim" in self.__dict__ else self.optimizer(self.parameters(), lr=self.lr)
     
-        if X_valid is not None and y_valid is not None:
-            valid_loader = self.getDataLoader(X_valid, y_valid)
-            patience = self.patience
-        else:
-            patience = -1
-    
-        if "optim" in self.__dict__:
-            optimizer = self.optim
-        else:
-            optimizer = self.optimizer(self.parameters(), lr=self.lr)#, 
+        # Weighted loss for imbalance
         y_tensor = torch.tensor(y_train.values, dtype=torch.float32)
         pos_weight_val = (y_tensor == 0).sum() / (y_tensor == 1).sum()
         pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32).to(self.device)
-        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)    
+        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     
         best_loss = np.inf
-        best_mcc = -1
-        best_weights = self.state_dict()
+        best_weights = copy.deepcopy(self.state_dict())
         last_save = 0
     
-        # Vytvoření OneCycleLR scheduleru
-        steps_per_epoch = len(train_loader)
-        total_steps = self.n_epochs * steps_per_epoch
+        # Scheduler
         scheduler = OneCycleLR(
             optimizer,
-            max_lr=self.lr * 10, 
-           total_steps=total_steps,
-            pct_start=0.3,  
-            anneal_strategy="cos",  
+            max_lr=self.lr * 10,
+            total_steps=self.n_epochs * len(train_loader),
+            pct_start=0.3,
+            anneal_strategy="cos",
             final_div_factor=1e4,
             div_factor=25.0,
         )
@@ -142,49 +162,46 @@ class Base(nn.Module):
         for epoch in range(self.n_epochs):
             monitor.onEpochStart(epoch)
             loss = None
+    
+            self.train()
             for i, (Xb, yb) in enumerate(train_loader):
                 monitor.onBatchStart(i)
                 Xb, yb = Xb.to(self.device), yb.to(self.device)
                 optimizer.zero_grad()
-    
+                
                 y_ = self(Xb, is_train=True)
+                # Remove potential NaNs
                 ix = yb == yb
-                if self.n_class > 1:
-                    yb, y_ = yb[ix], y_[ix[:, -1], :]
-                else:
-                    yb, y_ = yb[ix], y_[ix]
+                yb, y_ = yb[ix], y_[ix]
     
-                if self.n_class > 1:
-                    loss = self.criterion(y_, yb.long())
-                else:
-                    loss = self.criterion(y_, yb)
+                loss = self.criterion(y_, yb)
                 loss.backward()
                 optimizer.step()
-                scheduler.step()  
+                scheduler.step()
                 monitor.onBatchEnd(i, float(loss))
     
-            if patience == -1:
-                monitor.onEpochEnd(epoch, loss.item())
-            else:
-                valid_pred = self.predict(valid_loader) > 0.5
+            if valid_loader is not None:
                 loss_valid = self.evaluate(valid_loader)
-                mcc_val = matthews_corrcoef(valid_pred, y_valid)
-                print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f} | MCC: {mcc_val}")
-                #if loss_valid + self.tol < best_loss:
-                if mcc_val > best_mcc:
-                    best_weights = self.state_dict()
+                pred = self.predict(X_valid) > 0.5
+                if self.print_outputs > 1:
+                    print(f"Epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f} | MCC: {matthews_corrcoef(pred, y_valid):.4f}")
+                if loss_valid + self.tol < best_loss:
                     best_loss = loss_valid
-                    best_mcc = mcc_val
+                    best_weights = copy.deepcopy(self.state_dict())
                     last_save = epoch
                 elif epoch - last_save > patience:
-                    print(f"Finishing on epoch {epoch + 1} | Train Loss: {loss.item():.4f} | Valid Loss: {loss_valid:.4f} | MCC: {mcc_val}")
+                    if self.print_outputs > 0:
+                        print(f"Early stopping at epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
                     break
-                monitor.onEpochEnd(epoch, loss.item(), loss_valid)
     
-        if patience == -1:
-            best_weights = self.state_dict()
+                monitor.onEpochEnd(epoch, loss.item(), loss_valid)
+            else:
+                monitor.onEpochEnd(epoch, loss.item())
+    
         self.load_state_dict(best_weights)
         return self, last_save
+
+
 
 
 
@@ -204,45 +221,45 @@ class Base(nn.Module):
                 function with given test set.
         """
         self.to(self.device)
-        loss = 0
-        for Xb, yb in loader:
-            Xb, yb = Xb.to(self.device), yb.to(self.device)
-            y_ = self.forward(Xb)
-            ix = yb == yb
-            if self.n_class > 1:
-                yb, y_ = yb[ix], y_[ix[:, -1], :]
-            else:
+        self.eval()
+        total_loss = 0.0
+        total_samples = 0
+        with torch.no_grad():
+            for Xb, yb in loader:
+                Xb, yb = Xb.to(self.device), yb.to(self.device)
+                y_ = self.forward(Xb)
+                ix = yb == yb
                 yb, y_ = yb[ix], y_[ix]
-            if self.n_class > 1:
-                loss += self.criterion(y_, yb.long()).item()
-            else:
-                loss += self.criterion(y_, yb).item()
-        loss = loss / len(loader)
-        return loss
+                
+                batch_size = yb.size(0)
+                loss = self.criterion(y_, yb)
+                total_loss += loss.item() * batch_size
+                total_samples += batch_size
+        return total_loss / total_samples if total_samples > 0 else float("inf")
+        
 
     def predict(self, X_test) -> np.ndarray:
-        """Predicting the probability of each sample in the given dataset.
-
-        Args:
-            X_test (ndarray):
-                m X n target array (m is the No. of sample,
-                n is the No. of features)
-
-        Returns:
-            score (ndarray):
-                probability of each sample in the given dataset,
-                it is an m X l FloatTensor (m is the No. of sample, l is the
-                No. of classes or tasks.)
-        """
+        """Predict the probability of each sample in the dataset."""
         self.to(self.device)
-        loader = self.getDataLoader(X_test)
+        self.eval()
+        # If already a DataLoader, skip wrapping
+        if isinstance(X_test, DataLoader):
+            loader = X_test
+        else:
+            loader = self.getDataLoader(X_test)
+    
         score = []
-        for X_b in loader:
+        for batch in loader:
+            if isinstance(batch, (tuple, list)):
+                X_b = batch[0]  # In case it's (X, y)
+            else:
+                X_b = batch  # In case it's just X
+    
             X_b = X_b.to(self.device)
             y_ = self.forward(X_b)
             score.append(y_.detach().cpu())
-        score = torch.cat(score, dim=0).numpy()
-        return score
+        return torch.sigmoid(torch.cat(score, dim=0)).numpy()
+
 
     @classmethod
     def _get_param_names(cls) -> list:
@@ -333,12 +350,27 @@ class Base(nn.Module):
             y = y.values
         if y is None:
             tensordataset = torch.Tensor(X)
+            return DataLoader(
+                tensordataset,
+                batch_size=self.batch_size,
+                shuffle=False
+            )
         else:
             tensordataset = TensorDataset(torch.Tensor(X), torch.Tensor(y))
-        return DataLoader(tensordataset, batch_size=self.batch_size)
+            # Create a generator seeded to your trial or global seed
+            g = torch.Generator()
+            g.manual_seed(self.seed)
+            return DataLoader(
+                tensordataset,
+                batch_size=self.batch_size,
+                shuffle=True,
+                generator=g,
+                num_workers=0  # keep at 0 for full reproducibility
+            )
 
     @staticmethod
     def set_seed(seed):
+        print(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         np.random.seed(seed)
@@ -362,7 +394,6 @@ class STFullyConnected(Base):
         batch_size (int): batch size for training
         patience (int): early stopping patience
         tol (float): early stopping tolerance
-        is_reg (bool): whether the model is for regression or classification
         dropout_frac (float): dropout fraction
         criterion (torch.nn.Module): the loss function
         dropout (torch.nn.Module): the dropout layer
@@ -376,20 +407,18 @@ class STFullyConnected(Base):
             n_dim,
             n_class,
             device,
-            gpus,
             act_fun=f.relu,
             n_epochs=100,
-            lr=None,
+            lr=1e-4 ,
             batch_size=256,
             patience=50,
             tol=0,
-            is_reg=True,
-            neuron_layers=None,
+            neuron_layers=[2048, 1024],
             dropout_frac=0.25,
             weight_decay=0,
-            random_seed=42,
             optimizer=optim.AdamW,
-            seed = 42
+            seed = 42,
+            print_outputs = 0
     ):
         """Initialize the STFullyConnected model.
 
@@ -414,8 +443,6 @@ class STFullyConnected(Base):
             tol (float):
                 minimum absolute improvement of loss necessary to
                 count as progress on best validation score
-            is_reg (bool, optional):
-                Regression model (True) or Classification model (False)
             neurons_h1 (int):
                 number of neurons in first hidden layer
             neurons_hx (int):
@@ -425,13 +452,8 @@ class STFullyConnected(Base):
             dropout_frac (float):
                 dropout fraction
         """
-        if neuron_layers is None:
-            neuron_layers = [2048, 1024]
-        if not lr:
-            lr = 1e-4 if is_reg else 1e-5
         super().__init__(
             device=device,
-            gpus=gpus,
             n_epochs=n_epochs,
             lr=lr,
             batch_size=batch_size,
@@ -439,16 +461,14 @@ class STFullyConnected(Base):
             tol=tol,
             weight_decay=weight_decay,
             optimizer=optimizer,
-            seed= seed
+            seed=seed,
+             print_outputs=print_outputs
         )
         self.n_dim = n_dim
-        self.is_reg = is_reg
-        self.n_class = n_class if not self.is_reg else 1
         self.dropout_frac = dropout_frac
         self.dropout = None
         self.neuron_layers = neuron_layers
         self.layers = []
-        self.final_layer_activation = None
         self.criterion = None
         self.act_fun = act_fun
         self.weight_decay = weight_decay
@@ -456,24 +476,12 @@ class STFullyConnected(Base):
 
     def initModel(self):
         """Define the layers of the model."""
-        # self.optimizer = torch.optim.Adam()
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(self.n_dim, self.neuron_layers[0]))
         for i in range(1, len(self.neuron_layers)):
             self.layers.append(nn.Linear(self.neuron_layers[i - 1], self.neuron_layers[i]))
-        self.layers.append(nn.Linear(self.neuron_layers[-1], self.n_class))
+        self.layers.append(nn.Linear(self.neuron_layers[-1], 1))
         self.dropout = nn.Dropout(self.dropout_frac)
-        if self.is_reg:
-            # loss function for regression
-            self.criterion = nn.MSELoss()
-        elif self.n_class == 1:
-            # loss and activation function of output layer for binary classification
-            self.criterion = nn.BCELoss()
-            self.final_layer_activation = nn.Sigmoid()
-        else:
-            # loss and activation function of output layer for multiple classification
-            self.criterion = nn.CrossEntropyLoss()
-            self.final_layer_activation = nn.Softmax(dim=1)
 
     def set_params(self, **params) -> "STFullyConnected":
         """Set parameters and re-initialize model.
@@ -508,11 +516,6 @@ class STFullyConnected(Base):
             y = self.act_fun(self.layers[i](y))
             if is_train:
                 y = self.dropout(y)  # Apply dropout only during training
-
-        if self.is_reg:
-            # If regression, no activation on the final layer (identity function)
-            y = self.layers[-1](y)
-        else:
-            # If classification, apply the final layer activation (e.g., Softmax, Sigmoid)
-            y = self.final_layer_activation(self.layers[-1](y))
+        # SoftMax from BCEWithLogitsLoss
+        y = self.layers[-1](y)
         return y

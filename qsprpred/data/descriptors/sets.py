@@ -13,11 +13,12 @@ from rdkit.Chem import AllChem, Crippen
 from rdkit.Chem import Descriptors as desc
 from rdkit.Chem import Lipinski
 from rdkit.Chem import Mol, Descriptors
-from rdkit.ML.Descriptors import MoleculeDescriptors
+from rdkit.xtML.Descriptors import MoleculeDescriptors
 
 from ..processing.mol_processor import MolProcessorWithID
 from ...logs import logger
 from ...utils.serialization import JSONSerializable
+from math import ceil
 
 
 class DescriptorSet(JSONSerializable, MolProcessorWithID, ABC):
@@ -383,67 +384,6 @@ class DrugExPhyschem(DescriptorSet):
         }
 
 
-class RDKitDescs(DescriptorSet):
-    """
-    Calculate RDkit descriptors.
-
-    Args:
-        rdkit_descriptors: list of descriptors to calculate, if none, all 2D rdkit
-            descriptors will be calculated
-        include_3d: if True, 3D descriptors will be calculated
-    """
-
-    def __init__(
-        self, rdkit_descriptors: list[str] | None = None, include_3d: bool = False
-    ):
-        super().__init__()
-        self.descriptors = (
-            rdkit_descriptors
-            if rdkit_descriptors is not None
-            else sorted({x[0] for x in Descriptors._descList})
-        )
-        if include_3d:
-            self.descriptors = sorted(
-                [
-                    *self.descriptors,
-                    "Asphericity",
-                    "Eccentricity",
-                    "InertialShapeFactor",
-                    "NPR1",
-                    "NPR2",
-                    "PMI1",
-                    "PMI2",
-                    "PMI3",
-                    "RadiusOfGyration",
-                    "SpherocityIndex",
-                ]
-            )
-        self.include3D = include_3d
-
-    def getDescriptors(
-        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
-    ) -> np.ndarray:
-        mols = self.iterMols(mols, to_list=True)
-        scores = np.zeros((len(mols), len(self.descriptors)))
-        calc = MoleculeDescriptors.MolecularDescriptorCalculator(self.descriptors)
-        for i, mol in enumerate(mols):
-            try:
-                scores[i] = calc.CalcDescriptors(mol)
-            except AttributeError:
-                scores[i] = [np.nan] * len(self.descriptors)
-        return scores
-
-    @property
-    def descriptors(self):
-        return self._descriptors
-
-    @descriptors.setter
-    def descriptors(self, descriptors):
-        self._descriptors = descriptors
-
-    def __str__(self):
-        return "RDkit"
-
 
 class TanimotoDistances(DescriptorSet):
     """
@@ -623,3 +563,138 @@ class SmilesDesc(DescriptorSet):
 
     def __str__(self):
         return "SmilesDesc"
+
+
+
+
+
+
+
+
+
+
+class RDKitDescs(DescriptorSet):
+    """
+    Calculate RDkit descriptors.
+
+    Args:
+        rdkit_descriptors: list of descriptors to calculate, if none, all 2D rdkit
+            descriptors will be calculated
+        include_3d: if True, 3D descriptors will be calculated
+    """
+
+    def __init__(
+        self, rdkit_descriptors: list[str] | None = None, include_3d: bool = False
+    ):
+        super().__init__()
+        self.descriptors = (
+            rdkit_descriptors
+            if rdkit_descriptors is not None
+            else sorted({x[0] for x in Descriptors._descList})
+        )
+        if include_3d:
+            self.descriptors = sorted(
+                [
+                    *self.descriptors,
+                    "Asphericity",
+                    "Eccentricity",
+                    "InertialShapeFactor",
+                    "NPR1",
+                    "NPR2",
+                    "PMI1",
+                    "PMI2",
+                    "PMI3",
+                    "RadiusOfGyration",
+                    "SpherocityIndex",
+                ]
+            )
+        self.include3D = include_3d
+
+    def getDescriptors(
+        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+    ) -> np.ndarray:
+        mols = self.iterMols(mols, to_list=True)
+        scores = np.zeros((len(mols), len(self.descriptors)))
+        calc = MoleculeDescriptors.MolecularDescriptorCalculator(self.descriptors)
+        for i, mol in enumerate(mols):
+            try:
+                scores[i] = calc.CalcDescriptors(mol)
+            except AttributeError:
+                scores[i] = [np.nan] * len(self.descriptors)
+        return scores
+
+    @property
+    def descriptors(self):
+        return self._descriptors
+
+    @descriptors.setter
+    def descriptors(self, descriptors):
+        self._descriptors = descriptors
+
+    def __str__(self):
+        return "RDkit"
+
+
+from transformers import AutoTokenizer, AutoModel
+import torch
+
+class TransfomerDesc(DescriptorSet):
+    """
+    Calculate Transformer descriptors.
+
+    Args:
+    """
+
+    def __init__(
+        self, model_name: str = "entropy/roberta_zinc_480m"
+    ):
+        super().__init__()
+        self.model_name = model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name)
+        self.model.eval()
+        embedding_size = self.model.config.hidden_size
+        self._descriptors = [f"embed_{i}" for i in range(embedding_size)]
+       
+    def getDescriptors(
+        self, mols: list[Mol], props: dict[str, list[Any]], *args, **kwargs
+    ) -> np.ndarray:
+        # TODO: Fine
+        # TODO: implement invalid smiles processing
+        smiles_list = [Chem.MolToSmiles(mol) for mol in mols] # TODO: Smarter way to get SMILES
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        batch_size = 32 # TODO: implement loading from kwargs
+        self.model.to(device) 
+        all_embeddings = []
+        num_batches = ceil(len(smiles_list) / batch_size)
+        for i in range(num_batches):
+            start_index = i * batch_size
+            end_index = (i + 1) * batch_size
+            batch_smiles = smiles_list[start_index:end_index]
+            inputs = self.tokenizer(
+                batch_smiles,
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            )# trncation = max length (context window)
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    embeddings = outputs.pooler_output
+                else:
+                    embeddings = outputs.last_hidden_state[:, 0, :]
+            all_embeddings.append(embeddings.cpu().numpy())
+        final_scores = np.concatenate(all_embeddings, axis=0)
+        return final_scores
+
+    @property
+    def descriptors(self):
+        return self._descriptors
+
+    @descriptors.setter
+    def descriptors(self, descriptors):
+        self._descriptors = descriptors
+
+    def __str__(self):
+        return self.model_name.split("/",1)[1]

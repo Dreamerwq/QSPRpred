@@ -159,3 +159,11 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# CSV files
+*.csv
+qsprpred/extra/gpu/models/MolEval/
+qsprpred/extra/gpu/models/CK1/qsprpred/
+data/
+mod_data/
+qsprpred/extra/gpu/models/xgboost/
