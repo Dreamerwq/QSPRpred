@@ -2,11 +2,9 @@
 from mols2grid import display
 from torch.nn.functional import linear
 
-# Přidání cesty k adresáři, kde se nachází tvůj skript
-# sys.path.append(os.path.abspath('/Users/krynekt/DataspellProjects/Bakalarka/QSPRpred/qsprpred/extra/gpu/models'))
+
 import sys, os
 sys.path.insert(0, os.path.abspath('/Users/krynekt/DataspellProjects/Bakalarka/QSPRpred/'))
-# Nyní můžeš naimportovat svůj skript
 print(sys.path)
 import pandas as pd
 
@@ -55,8 +53,8 @@ from qsprpred.extra.gpu.models.neural_network import STFullyConnected
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 x = STFullyConnected(
-        n_dim=dataset.X.shape[1],  # počet vstupních neuronů (počet deskriptorů)
-        n_class=1,  # regresní úloha (1 výstup)
+        n_dim=dataset.X.shape[1],  
+        n_class=1,  
         gpus=[],
         device=device,
         batch_size=256,
